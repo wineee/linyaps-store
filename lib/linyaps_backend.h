@@ -28,6 +28,8 @@ void linyaps_search(LinyapsContext *ctx,
 LinyapsPackageInfo **linyaps_list_installed(LinyapsContext *ctx,
                                             size_t *out_count);
 
+LinyapsPackageInfo *linyaps_info(LinyapsContext *ctx, const char *app_id);
+
 void linyaps_install(LinyapsContext *ctx,
                      const char *app_id,
                      const char *version,

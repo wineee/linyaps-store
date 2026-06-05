@@ -38,6 +38,28 @@ static void print_package(const LinyapsPackageInfo *info, size_t index)
            info->name ? info->name : "");
 }
 
+static void print_info(const LinyapsPackageInfo *info)
+{
+    printf("id: %s\n", info->id ? info->id : "");
+    printf("name: %s\n", info->name ? info->name : "");
+    printf("version: %s\n", info->version ? info->version : "");
+    printf("channel: %s\n", info->channel ? info->channel : "");
+    printf("module: %s\n", info->module ? info->module : "");
+    printf("kind: %s\n", info->kind ? info->kind : "");
+    printf("arch: %s\n", info->arch ? info->arch : "");
+    printf("base: %s\n", info->base ? info->base : "");
+    printf("runtime: %s\n", info->runtime ? info->runtime : "");
+    printf("command: %s\n", info->command ? info->command : "");
+    printf("schema_version: %s\n", info->schema_version ? info->schema_version : "");
+    printf("size: %lld\n", (long long)info->size);
+    const char *description = info->description ? info->description : "";
+    printf("description: %s", description);
+    size_t description_len = strlen(description);
+    if (description_len == 0 || description[description_len - 1] != '\n') {
+        putchar('\n');
+    }
+}
+
 static void search_cb(LinyapsPackageInfo **results,
                       size_t count,
                       int error_code,
@@ -122,6 +144,7 @@ static void print_help(void)
     puts("commands:");
     puts("  service");
     puts("  list");
+    puts("  info <app_id>");
     puts("  search <keyword> [repo1,repo2]");
     puts("  install <app_id> [version] [channel]");
     puts("  uninstall <app_id> <version> [channel]");
@@ -180,6 +203,14 @@ int main(void)
                 print_package(items[i], i + 1);
             }
             linyaps_package_info_list_free(items, count);
+        } else if (strcmp(argv[0], "info") == 0 && argc >= 2) {
+            LinyapsPackageInfo *info = linyaps_info(ctx, argv[1]);
+            if (!info) {
+                puts("no package info");
+                continue;
+            }
+            print_info(info);
+            linyaps_package_info_free(info);
         } else if (strcmp(argv[0], "search") == 0 && argc >= 2) {
             int pending = 1;
             linyaps_search(ctx, argv[1], argc >= 3 ? argv[2] : NULL, search_cb, &pending);

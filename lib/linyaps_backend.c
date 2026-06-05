@@ -1098,6 +1098,14 @@ static int parse_package_map(sd_bus_message *m,
             r = read_variant_string(m, sig, &info->module);
         } else if (strcmp(key, "description") == 0) {
             r = read_variant_string(m, sig, &info->description);
+        } else if (strcmp(key, "base") == 0) {
+            r = read_variant_string(m, sig, &info->base);
+        } else if (strcmp(key, "runtime") == 0) {
+            r = read_variant_string(m, sig, &info->runtime);
+        } else if (strcmp(key, "schema_version") == 0) {
+            r = read_variant_string(m, sig, &info->schema_version);
+        } else if (strcmp(key, "command") == 0) {
+            r = read_variant_first_string_array(m, sig, &info->command);
         } else if (strcmp(key, "arch") == 0) {
             r = read_variant_first_string_array(m, sig, &info->arch);
         } else if (strcmp(key, "size") == 0) {
@@ -1724,14 +1732,11 @@ static char *json_first_string(const cJSON *obj, const char *field)
     return dupstr(item->valuestring);
 }
 
-static void parse_installed_object(const cJSON *obj,
-                                   LinyapsPackageInfo ***items,
-                                   size_t *count,
-                                   size_t *cap)
+static LinyapsPackageInfo *package_info_from_json_object(const cJSON *obj, const char *repo)
 {
     LinyapsPackageInfo *info = package_info_new();
     if (!info) {
-        return;
+        return NULL;
     }
     info->id = json_dup_string(obj, "id");
     info->name = json_dup_string(obj, "name");
@@ -1741,22 +1746,34 @@ static void parse_installed_object(const cJSON *obj,
     info->kind = json_dup_string(obj, "kind");
     info->module = json_dup_string(obj, "module");
     info->arch = json_first_string(obj, "arch");
-    info->repo = dupstr("local");
+    info->base = json_dup_string(obj, "base");
+    info->runtime = json_dup_string(obj, "runtime");
+    info->schema_version = json_dup_string(obj, "schema_version");
+    info->command = json_first_string(obj, "command");
+    info->repo = dupstr(repo);
     info->size = json_int64(obj, "size");
     if (!info->id) {
         linyaps_package_info_free(info);
+        return NULL;
+    }
+    return info;
+}
+
+static void parse_installed_object(const cJSON *obj,
+                                   LinyapsPackageInfo ***items,
+                                   size_t *count,
+                                   size_t *cap)
+{
+    LinyapsPackageInfo *info = package_info_from_json_object(obj, "local");
+    if (!info) {
         return;
     }
     package_list_append(items, count, cap, info);
 }
 
-LinyapsPackageInfo **linyaps_list_installed(LinyapsContext *ctx, size_t *out_count)
+static char *run_command_capture(const char *cmd)
 {
-    (void)ctx;
-    if (out_count) {
-        *out_count = 0;
-    }
-    FILE *fp = popen("ll-cli list --json", "r");
+    FILE *fp = popen(cmd, "r");
     if (!fp) {
         return NULL;
     }
@@ -1793,6 +1810,19 @@ LinyapsPackageInfo **linyaps_list_installed(LinyapsContext *ctx, size_t *out_cou
     }
     pclose(fp);
     buf[len] = '\0';
+    return buf;
+}
+
+LinyapsPackageInfo **linyaps_list_installed(LinyapsContext *ctx, size_t *out_count)
+{
+    (void)ctx;
+    if (out_count) {
+        *out_count = 0;
+    }
+    char *buf = run_command_capture("ll-cli list --json");
+    if (!buf) {
+        return NULL;
+    }
 
     cJSON *root = cJSON_Parse(buf);
     free(buf);
@@ -1818,6 +1848,46 @@ LinyapsPackageInfo **linyaps_list_installed(LinyapsContext *ctx, size_t *out_cou
     return items;
 }
 
+static int shell_safe_app_id(const char *app_id)
+{
+    if (!app_id || !*app_id) {
+        return 0;
+    }
+    for (const char *p = app_id; *p; p++) {
+        if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') ||
+            *p == '.' || *p == '-' || *p == '_' || *p == '/' ) {
+            continue;
+        }
+        return 0;
+    }
+    return 1;
+}
+
+LinyapsPackageInfo *linyaps_info(LinyapsContext *ctx, const char *app_id)
+{
+    (void)ctx;
+    if (!shell_safe_app_id(app_id)) {
+        return NULL;
+    }
+
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "ll-cli --json info %s", app_id);
+    char *buf = run_command_capture(cmd);
+    if (!buf) {
+        return NULL;
+    }
+
+    cJSON *root = cJSON_Parse(buf);
+    free(buf);
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    LinyapsPackageInfo *info = package_info_from_json_object(root, "local");
+    cJSON_Delete(root);
+    return info;
+}
+
 void linyaps_package_info_free(LinyapsPackageInfo *info)
 {
     if (!info) {
@@ -1832,6 +1902,10 @@ void linyaps_package_info_free(LinyapsPackageInfo *info)
     free(info->description);
     free(info->kind);
     free(info->module);
+    free(info->base);
+    free(info->runtime);
+    free(info->schema_version);
+    free(info->command);
     free(info);
 }
 

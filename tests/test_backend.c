@@ -45,6 +45,16 @@ static void test_optional_service_checks(void)
         linyaps_package_info_list_free(installed, count);
     }
 
+    LinyapsPackageInfo *info = linyaps_info(ctx, "org.deepin.draw");
+    if (info) {
+        assert(info->id != NULL);
+        assert(strcmp(info->id, "org.deepin.draw") == 0);
+        assert(info->version != NULL);
+        linyaps_package_info_free(info);
+    } else {
+        puts("org.deepin.draw not installed; skipping info check");
+    }
+
     linyaps_context_free(ctx);
 }
 
