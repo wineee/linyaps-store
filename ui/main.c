@@ -4,18 +4,85 @@
 #include "../kilnui/src/kilnui.h"
 #include "../kilnui/src/ui/ui.h"
 #include "../lib/linyaps_backend.h"
+#include "../lib/linyaps_remote.h"
 #include "../lib/linyaps_log.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
-/* Search callback                                                     */
+/* Remote fetch — runs in a background thread                          */
 /* ------------------------------------------------------------------ */
 
+/* Custom SDL user event types */
+#define EVT_REMOTE_READY  0u   /* remote app list arrived */
+
+typedef struct {
+    LinyapsPackageInfo **list;
+    size_t               count;
+} RemoteResult;
+
 static StoreState *g_store = NULL;
+static Uint32      g_user_event_type = 0;
+
+static void *fetch_remote_thread(void *arg)
+{
+    (void)arg;
+    size_t count = 0;
+    long   total = 0;
+
+    /* Fetch first page (up to 30 apps) — extend later for pagination */
+    LinyapsRemoteAppInfo **remote = linyaps_remote_fetch_apps(
+        "", NULL, 1, LINYAPS_REMOTE_PAGE_SIZE, &count, &total);
+
+    /* Convert to LinyapsPackageInfo** so we can reuse existing display code */
+    LinyapsPackageInfo **list = NULL;
+    if (remote && count > 0) {
+        list = calloc(count, sizeof(*list));
+        if (list) {
+            for (size_t i = 0; i < count; i++)
+                list[i] = linyaps_remote_app_info_to_package_info(remote[i]);
+        }
+        linyaps_remote_app_info_list_free(remote, count);
+    }
+
+    LOG_INFO("remote", "远端拉取完成: count=%zu total=%ld", count, total);
+
+    /* Post result back to the main thread via SDL user event */
+    RemoteResult *res = malloc(sizeof(*res));
+    if (res) {
+        res->list  = list;
+        res->count = count;
+        SDL_Event ev;
+        SDL_zero(ev);
+        ev.type       = g_user_event_type;
+        ev.user.code  = EVT_REMOTE_READY;
+        ev.user.data1 = res;
+        SDL_PushEvent(&ev);
+    } else {
+        /* fallback: free on thread if malloc failed */
+        linyaps_package_info_list_free(list, count);
+    }
+    return NULL;
+}
+
+static void start_remote_fetch(void)
+{
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&tid, &attr, fetch_remote_thread, NULL) != 0)
+        LOG_WARN("remote", "无法创建后台拉取线程");
+    pthread_attr_destroy(&attr);
+}
+
+/* ------------------------------------------------------------------ */
+/* Search callback                                                     */
+/* ------------------------------------------------------------------ */
 
 static void on_search_results(LinyapsPackageInfo **items,
                                size_t count,
@@ -100,6 +167,11 @@ int main(int argc, char *argv[])
     if (!font) { SDL_Log("No font found"); return 1; }
     if (!KilnUI_init(&ctx, "玲珑应用商店", 1060, 660, font, 14)) return 1;
 
+    /* ---- Register custom SDL event type for background threads ---- */
+    g_user_event_type = SDL_RegisterEvents(1);
+    if (g_user_event_type == (Uint32)-1)
+        LOG_WARN("main", "SDL_RegisterEvents failed");
+
     /* ---- Backend init ---- */
     LinyapsContext *lctx = linyaps_context_new();
     if (lctx) {
@@ -115,7 +187,7 @@ int main(int argc, char *argv[])
     DS_SetTheme(&DS_THEME_LIGHT);   /* reference UI uses a light theme */
     store.dark_mode = false;
 
-    /* Pre-populate with installed packages */
+    /* Pre-populate with installed packages (shown while remote loads) */
     if (lctx) {
         store.installed_list = linyaps_list_installed(lctx, &store.installed_count);
         LOG_INFO("main", "已安装应用: count=%zu", store.installed_count);
@@ -123,6 +195,10 @@ int main(int argc, char *argv[])
         store.search_results = store.installed_list;
         store.search_count   = store.installed_count;
     }
+
+    /* Kick off background remote fetch to populate the full app list */
+    LOG_INFO("main", "启动远端应用列表拉取...");
+    start_remote_fetch();
 
     /* ---- Event loop ---- */
     bool running        = true;
@@ -145,6 +221,24 @@ int main(int argc, char *argv[])
             if (e.type == SDL_EVENT_QUIT) { running = false; break; }
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE
                 && !store.search_focused) { running = false; break; }
+
+            /* ---- Background remote fetch completed ---- */
+            if (g_user_event_type != (Uint32)-1 &&
+                e.type == g_user_event_type &&
+                e.user.code == EVT_REMOTE_READY) {
+                RemoteResult *res = e.user.data1;
+                if (res) {
+                    LOG_INFO("main", "远端列表到达，刷新显示 count=%zu", res->count);
+                    /* Replace display list with remote full list */
+                    if (store.search_results != store.installed_list)
+                        linyaps_package_info_list_free(store.search_results, store.search_count);
+                    store.search_results = res->list;
+                    store.search_count   = res->count;
+                    store.dirty = true;
+                    free(res);
+                }
+                continue;
+            }
 
             if (e.type == SDL_EVENT_MOUSE_MOTION) {
                 mx = e.motion.x; my = e.motion.y;
