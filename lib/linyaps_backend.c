@@ -4,6 +4,7 @@
 
 #include "linyaps_backend.h"
 
+#include <cJSON.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1107,117 +1108,35 @@ void linyaps_prune(LinyapsContext *ctx, LinyapsCompletionCallback cb, void *user
     sd_bus_message_unref(reply);
 }
 
-static int json_str(const char *obj, const char *field, char **out)
+static char *json_dup_string(const cJSON *obj, const char *field)
 {
-    char key[128];
-    snprintf(key, sizeof(key), "\"%s\"", field);
-    const char *p = strstr(obj, key);
-    if (!p) {
-        return -ENOENT;
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, field);
+    if (!cJSON_IsString(item) || !item->valuestring) {
+        return NULL;
     }
-    p += strlen(key);
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
-        p++;
-    }
-    if (*p++ != ':') {
-        return -EINVAL;
-    }
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
-        p++;
-    }
-    if (*p++ != '"') {
-        return -EINVAL;
-    }
-    size_t cap = 64;
-    size_t len = 0;
-    char *buf = malloc(cap);
-    if (!buf) {
-        return -ENOMEM;
-    }
-    while (*p && *p != '"') {
-        char c = *p++;
-        if (c == '\\' && *p) {
-            c = *p++;
-            if (c == 'n') {
-                c = '\n';
-            } else if (c == 't') {
-                c = '\t';
-            }
-        }
-        if (len + 1 >= cap) {
-            cap *= 2;
-            char *tmp = realloc(buf, cap);
-            if (!tmp) {
-                free(buf);
-                return -ENOMEM;
-            }
-            buf = tmp;
-        }
-        buf[len++] = c;
-    }
-    buf[len] = '\0';
-    *out = buf;
-    return 0;
+    return dupstr(item->valuestring);
 }
 
-static int64_t json_int(const char *obj, const char *field)
+static int64_t json_int64(const cJSON *obj, const char *field)
 {
-    char key[128];
-    snprintf(key, sizeof(key), "\"%s\"", field);
-    const char *p = strstr(obj, key);
-    if (!p) {
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, field);
+    if (!cJSON_IsNumber(item)) {
         return 0;
     }
-    p += strlen(key);
-    while (*p && *p != ':') {
-        p++;
-    }
-    if (*p == ':') {
-        p++;
-    }
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
-        p++;
-    }
-    return strtoll(p, NULL, 10);
+    return (int64_t)item->valuedouble;
 }
 
-static int json_arch_first(const char *obj, char **out)
+static char *json_first_string(const cJSON *obj, const char *field)
 {
-    const char *p = strstr(obj, "\"arch\"");
-    if (!p) {
-        return -ENOENT;
+    const cJSON *array = cJSON_GetObjectItemCaseSensitive(obj, field);
+    const cJSON *item = cJSON_GetArrayItem(array, 0);
+    if (!cJSON_IsString(item) || !item->valuestring) {
+        return NULL;
     }
-    p = strchr(p, '[');
-    if (!p) {
-        return -EINVAL;
-    }
-    p++;
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
-        p++;
-    }
-    if (*p++ != '"') {
-        return -EINVAL;
-    }
-    const char *start = p;
-    while (*p && *p != '"') {
-        if (*p == '\\' && p[1]) {
-            p += 2;
-        } else {
-            p++;
-        }
-    }
-    size_t len = (size_t)(p - start);
-    char *buf = malloc(len + 1);
-    if (!buf) {
-        return -ENOMEM;
-    }
-    memcpy(buf, start, len);
-    buf[len] = '\0';
-    *out = buf;
-    return 0;
+    return dupstr(item->valuestring);
 }
 
-static void parse_installed_object(const char *obj,
+static void parse_installed_object(const cJSON *obj,
                                    LinyapsPackageInfo ***items,
                                    size_t *count,
                                    size_t *cap)
@@ -1226,16 +1145,16 @@ static void parse_installed_object(const char *obj,
     if (!info) {
         return;
     }
-    json_str(obj, "id", &info->id);
-    json_str(obj, "name", &info->name);
-    json_str(obj, "version", &info->version);
-    json_str(obj, "channel", &info->channel);
-    json_str(obj, "description", &info->description);
-    json_str(obj, "kind", &info->kind);
-    json_str(obj, "module", &info->module);
-    json_arch_first(obj, &info->arch);
+    info->id = json_dup_string(obj, "id");
+    info->name = json_dup_string(obj, "name");
+    info->version = json_dup_string(obj, "version");
+    info->channel = json_dup_string(obj, "channel");
+    info->description = json_dup_string(obj, "description");
+    info->kind = json_dup_string(obj, "kind");
+    info->module = json_dup_string(obj, "module");
+    info->arch = json_first_string(obj, "arch");
     info->repo = dupstr("local");
-    info->size = json_int(obj, "size");
+    info->size = json_int64(obj, "size");
     if (!info->id) {
         linyaps_package_info_free(info);
         return;
@@ -1287,43 +1206,24 @@ LinyapsPackageInfo **linyaps_list_installed(LinyapsContext *ctx, size_t *out_cou
     pclose(fp);
     buf[len] = '\0';
 
+    cJSON *root = cJSON_Parse(buf);
+    free(buf);
+    if (!cJSON_IsArray(root)) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+
     LinyapsPackageInfo **items = NULL;
     size_t count = 0;
     size_t cap = 0;
-    int depth = 0;
-    int in_str = 0;
-    int esc = 0;
-    char *start = NULL;
-    for (char *p = buf; *p; p++) {
-        if (in_str) {
-            if (esc) {
-                esc = 0;
-            } else if (*p == '\\') {
-                esc = 1;
-            } else if (*p == '"') {
-                in_str = 0;
-            }
-            continue;
-        }
-        if (*p == '"') {
-            in_str = 1;
-        } else if (*p == '{') {
-            if (depth == 0) {
-                start = p;
-            }
-            depth++;
-        } else if (*p == '}') {
-            depth--;
-            if (depth == 0 && start) {
-                char saved = p[1];
-                p[1] = '\0';
-                parse_installed_object(start, &items, &count, &cap);
-                p[1] = saved;
-                start = NULL;
-            }
+    const cJSON *obj = NULL;
+    cJSON_ArrayForEach(obj, root)
+    {
+        if (cJSON_IsObject(obj)) {
+            parse_installed_object(obj, &items, &count, &cap);
         }
     }
-    free(buf);
+    cJSON_Delete(root);
     if (out_count) {
         *out_count = count;
     }

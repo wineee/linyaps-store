@@ -8,9 +8,14 @@ set(CMAKE_C_EXTENSIONS OFF)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
 
+add_library(cjson STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/cjson/cJSON.c)
+target_include_directories(cjson PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/cjson)
+
 add_library(linyaps_store STATIC lib/linyaps_backend.c)
 target_include_directories(linyaps_store PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib)
-target_link_libraries(linyaps_store PUBLIC PkgConfig::SYSTEMD)
+target_link_libraries(linyaps_store PUBLIC PkgConfig::SYSTEMD PRIVATE cjson)
 
 add_executable(test_backend tests/test_backend.c)
 target_link_libraries(test_backend PRIVATE linyaps_store)
