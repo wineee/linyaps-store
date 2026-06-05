@@ -44,9 +44,12 @@ static void search_cb(LinyapsPackageInfo **results,
                       const char *error_msg,
                       void *userdata)
 {
-    (void)userdata;
+    int *pending = userdata;
     if (error_code != 0) {
         fprintf(stderr, "search failed: %s (%d)\n", error_msg ? error_msg : "unknown", error_code);
+        if (pending) {
+            *pending = 0;
+        }
         return;
     }
     printf("found %zu packages\n", count);
@@ -54,6 +57,9 @@ static void search_cb(LinyapsPackageInfo **results,
         print_package(results[i], i + 1);
     }
     linyaps_package_info_list_free(results, count);
+    if (pending) {
+        *pending = 0;
+    }
 }
 
 static void progress_cb(const LinyapsTaskProgress *progress, void *userdata)
@@ -165,7 +171,13 @@ int main(void)
             }
             linyaps_package_info_list_free(items, count);
         } else if (strcmp(argv[0], "search") == 0 && argc >= 2) {
-            linyaps_search(ctx, argv[1], argc >= 3 ? argv[2] : NULL, search_cb, NULL);
+            int pending = 1;
+            linyaps_search(ctx, argv[1], argc >= 3 ? argv[2] : NULL, search_cb, &pending);
+            while (pending) {
+                linyaps_process(ctx);
+                const struct timespec delay = { .tv_sec = 0, .tv_nsec = 100000000L };
+                nanosleep(&delay, NULL);
+            }
         } else if (strcmp(argv[0], "install") == 0 && argc >= 2) {
             state.active = 1;
             linyaps_install(ctx,

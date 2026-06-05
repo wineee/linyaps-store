@@ -26,6 +26,13 @@ typedef struct PendingOp {
     struct PendingOp *next;
 } PendingOp;
 
+typedef struct SearchOp {
+    char *job_id;
+    LinyapsSearchCallback cb;
+    void *userdata;
+    struct SearchOp *next;
+} SearchOp;
+
 typedef struct {
     char *path;
     LinyapsProgressCallback cb;
@@ -39,10 +46,18 @@ struct LinyapsContext {
     sd_bus *bus;
     sd_bus_slot *task_added_slot;
     sd_bus_slot *task_removed_slot;
+    sd_bus_slot *search_finished_slot;
     PendingOp *pending_head;
     PendingOp *pending_tail;
+    SearchOp *searches;
     TaskEntry tasks[MAX_TASKS];
 };
+
+static int parse_search_reply(sd_bus_message *reply,
+                              LinyapsPackageInfo ***out_items,
+                              size_t *out_count,
+                              int64_t *out_code,
+                              char **out_message);
 
 static void free_string(char **s)
 {
@@ -147,6 +162,54 @@ static void pending_pop_tail(LinyapsContext *ctx)
         ctx->pending_tail = NULL;
     }
     free(it);
+}
+
+static void search_push(LinyapsContext *ctx,
+                        const char *job_id,
+                        LinyapsSearchCallback cb,
+                        void *userdata)
+{
+    SearchOp *op = calloc(1, sizeof(*op));
+    if (!op) {
+        if (cb) {
+            cb(NULL, 0, -ENOMEM, "out of memory", userdata);
+        }
+        return;
+    }
+    op->job_id = dupstr(job_id);
+    op->cb = cb;
+    op->userdata = userdata;
+    op->next = ctx->searches;
+    ctx->searches = op;
+}
+
+static SearchOp *search_take(LinyapsContext *ctx, const char *job_id)
+{
+    SearchOp *prev = NULL;
+    SearchOp *it = ctx->searches;
+    while (it) {
+        if (it->job_id && strcmp(it->job_id, job_id) == 0) {
+            if (prev) {
+                prev->next = it->next;
+            } else {
+                ctx->searches = it->next;
+            }
+            it->next = NULL;
+            return it;
+        }
+        prev = it;
+        it = it->next;
+    }
+    return NULL;
+}
+
+static void search_op_free(SearchOp *op)
+{
+    if (!op) {
+        return;
+    }
+    free(op->job_id);
+    free(op);
 }
 
 static void notify_failed(LinyapsProgressCallback cb,
@@ -411,6 +474,89 @@ static int parse_common_result(sd_bus_message *reply, int64_t *code, char **mess
     return sd_bus_message_exit_container(reply);
 }
 
+static int parse_job_info(sd_bus_message *reply, int64_t *code, char **message, char **job_id)
+{
+    int r;
+    if (code) {
+        *code = 0;
+    }
+    if (message) {
+        *message = NULL;
+    }
+    if (job_id) {
+        *job_id = NULL;
+    }
+    r = sd_bus_message_enter_container(reply, 'a', "{sv}");
+    if (r < 0) {
+        return r;
+    }
+    while ((r = sd_bus_message_enter_container(reply, 'e', "sv")) > 0) {
+        const char *key = NULL;
+        char type = 0;
+        const char *sig = NULL;
+        if ((r = sd_bus_message_read_basic(reply, 's', &key)) < 0) {
+            return r;
+        }
+        if ((r = sd_bus_message_peek_type(reply, &type, &sig)) < 0) {
+            return r;
+        }
+        if (strcmp(key, "id") == 0 && sig && strcmp(sig, "s") == 0) {
+            const char *value = NULL;
+            if ((r = sd_bus_message_enter_container(reply, 'v', "s")) < 0) {
+                return r;
+            }
+            if ((r = sd_bus_message_read_basic(reply, 's', &value)) < 0) {
+                return r;
+            }
+            if (job_id) {
+                *job_id = dupstr(value);
+            }
+            if ((r = sd_bus_message_exit_container(reply)) < 0) {
+                return r;
+            }
+        } else if (strcmp(key, "code") == 0 && sig && strcmp(sig, "x") == 0) {
+            int64_t value = 0;
+            if ((r = sd_bus_message_enter_container(reply, 'v', "x")) < 0) {
+                return r;
+            }
+            if ((r = sd_bus_message_read_basic(reply, 'x', &value)) < 0) {
+                return r;
+            }
+            if (code) {
+                *code = value;
+            }
+            if ((r = sd_bus_message_exit_container(reply)) < 0) {
+                return r;
+            }
+        } else if (strcmp(key, "message") == 0 && sig && strcmp(sig, "s") == 0) {
+            const char *value = NULL;
+            if ((r = sd_bus_message_enter_container(reply, 'v', "s")) < 0) {
+                return r;
+            }
+            if ((r = sd_bus_message_read_basic(reply, 's', &value)) < 0) {
+                return r;
+            }
+            if (message) {
+                *message = dupstr(value);
+            }
+            if ((r = sd_bus_message_exit_container(reply)) < 0) {
+                return r;
+            }
+        } else {
+            if ((r = sd_bus_message_skip(reply, "v")) < 0) {
+                return r;
+            }
+        }
+        if ((r = sd_bus_message_exit_container(reply)) < 0) {
+            return r;
+        }
+    }
+    if (r < 0) {
+        return r;
+    }
+    return sd_bus_message_exit_container(reply);
+}
+
 static int read_task_properties(LinyapsContext *ctx, TaskEntry *te)
 {
     sd_bus_error err = SD_BUS_ERROR_NULL;
@@ -608,6 +754,41 @@ static int on_task_removed(sd_bus_message *m, void *userdata, sd_bus_error *ret_
     return 0;
 }
 
+static int on_search_finished(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
+{
+    (void)ret_error;
+    LinyapsContext *ctx = userdata;
+    const char *job_id = NULL;
+    int r = sd_bus_message_read_basic(m, 's', &job_id);
+    if (r < 0 || !job_id) {
+        return 0;
+    }
+    SearchOp *op = search_take(ctx, job_id);
+    if (!op) {
+        sd_bus_message_skip(m, "a{sv}");
+        return 0;
+    }
+
+    LinyapsPackageInfo **items = NULL;
+    size_t count = 0;
+    int64_t code = 0;
+    char *message = NULL;
+    r = parse_search_reply(m, &items, &count, &code, &message);
+    if (op->cb) {
+        op->cb(r < 0 || code != 0 ? NULL : items,
+               r < 0 || code != 0 ? 0 : count,
+               r < 0 ? r : (int)code,
+               r < 0 ? strerror(-r) : message,
+               op->userdata);
+    }
+    if (r < 0 || code != 0 || !op->cb) {
+        linyaps_package_info_list_free(items, count);
+    }
+    free(message);
+    search_op_free(op);
+    return 0;
+}
+
 LinyapsContext *linyaps_context_new(void)
 {
     LinyapsContext *ctx = calloc(1, sizeof(*ctx));
@@ -637,6 +818,15 @@ LinyapsContext *linyaps_context_new(void)
         linyaps_context_free(ctx);
         return NULL;
     }
+    r = sd_bus_add_match(ctx->bus,
+                         &ctx->search_finished_slot,
+                         "type='signal',sender='" PM_DEST "',interface='" PM_IFACE "',member='SearchFinished'",
+                         on_search_finished,
+                         ctx);
+    if (r < 0) {
+        linyaps_context_free(ctx);
+        return NULL;
+    }
     return ctx;
 }
 
@@ -648,11 +838,17 @@ void linyaps_context_free(LinyapsContext *ctx)
     while (ctx->pending_head) {
         pending_pop(ctx, NULL, NULL);
     }
+    while (ctx->searches) {
+        SearchOp *next = ctx->searches->next;
+        search_op_free(ctx->searches);
+        ctx->searches = next;
+    }
     for (size_t i = 0; i < MAX_TASKS; i++) {
         clear_task(&ctx->tasks[i]);
     }
     ctx->task_added_slot = sd_bus_slot_unref(ctx->task_added_slot);
     ctx->task_removed_slot = sd_bus_slot_unref(ctx->task_removed_slot);
+    ctx->search_finished_slot = sd_bus_slot_unref(ctx->search_finished_slot);
     ctx->bus = sd_bus_unref(ctx->bus);
     free(ctx);
 }
@@ -945,7 +1141,7 @@ void linyaps_search(LinyapsContext *ctx,
         r = append_sv_string(m, "id", keyword);
     }
     if (r >= 0) {
-        r = append_repos(m, repos);
+        r = append_repos(m, repos && *repos ? repos : "stable");
     }
     if (r >= 0) {
         r = sd_bus_message_close_container(m);
@@ -962,21 +1158,23 @@ void linyaps_search(LinyapsContext *ctx,
         sd_bus_message_unref(reply);
         return;
     }
-    LinyapsPackageInfo **items = NULL;
-    size_t count = 0;
+
     int64_t code = 0;
     char *message = NULL;
-    r = parse_search_reply(reply, &items, &count, &code, &message);
-    if (cb) {
-        cb(r < 0 || code != 0 ? NULL : items,
-           r < 0 || code != 0 ? 0 : count,
-           r < 0 ? r : (int)code,
-           r < 0 ? strerror(-r) : message,
-           userdata);
+    char *job_id = NULL;
+    r = parse_job_info(reply, &code, &message, &job_id);
+    if (r < 0 || code != 0 || !job_id || !*job_id) {
+        if (cb) {
+            cb(NULL,
+               0,
+               r < 0 ? r : (code != 0 ? (int)code : -EINVAL),
+               r < 0 ? strerror(-r) : (message ? message : "missing search job id"),
+               userdata);
+        }
+    } else {
+        search_push(ctx, job_id, cb, userdata);
     }
-    if (r < 0 || code != 0 || !cb) {
-        linyaps_package_info_list_free(items, count);
-    }
+    free(job_id);
     free(message);
     sd_bus_error_free(&err);
     sd_bus_message_unref(m);
