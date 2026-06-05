@@ -23,8 +23,48 @@
 #include "../lib/linyaps_backend.h"
 #include "../lib/linyaps_log.h"
 
+#include <spawn.h>
+#include <sys/wait.h>
 #include <stdio.h>
 #include <string.h>
+
+extern char **environ;
+
+/* ================================================================
+ * App launch helper
+ * ================================================================ */
+
+/* Launch an installed Linglong app via 'll-cli run <app_id>'.
+ * Uses posix_spawn so the UI thread is never blocked.
+ * The child is immediately waitpid(WNOHANG) to reap any instant exits;
+ * long-running apps are left as orphans (ll-cli exits after handing
+ * control to the container init). */
+static void launch_app(const char *app_id)
+{
+    if (!app_id || !*app_id) {
+        LOG_WARN("launch", "app_id is empty, skipping launch");
+        return;
+    }
+    /* Basic shell-safety check (app ids are reverse-DNS, dots/dashes OK) */
+    for (const char *p = app_id; *p; p++) {
+        if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+            (*p >= '0' && *p <= '9') ||
+            *p == '.' || *p == '-' || *p == '_' || *p == '/') continue;
+        LOG_WARN("launch", "app_id '%s' contains unsafe char '%c', aborting", app_id, *p);
+        return;
+    }
+
+    char *const argv[] = { "ll-cli", "run", (char *)app_id, NULL };
+    pid_t pid;
+    int r = posix_spawnp(&pid, "ll-cli", NULL, NULL, argv, environ);
+    if (r != 0) {
+        LOG_ERR("launch", "posix_spawnp failed for '%s': %s", app_id, strerror(r));
+        return;
+    }
+    LOG_INFO("launch", "ll-cli run %s (pid=%d)", app_id, (int)pid);
+    /* Non-blocking reap — ll-cli exits quickly after container launch */
+    waitpid(pid, NULL, WNOHANG);
+}
 
 /* ================================================================
  * ID ranges
@@ -263,9 +303,9 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
         /* Action button — capture return value to handle clicks */
         if (installed) {
             if (UI_Button(base + 5, "打开", UI_BTN_GHOST, UI_BTN_SM, false)) {
-                const char *app_id = info->id ? info->id : "(unknown)";
-                LOG_INFO("ui", "打开按钮点击: id=%s", app_id);
-                /* TODO: launch the application via ll-cli run <id> */
+                const char *app_id = info->id ? info->id : NULL;
+                LOG_INFO("ui", "打开按钮点击: id=%s", app_id ? app_id : "(unknown)");
+                launch_app(app_id);
             }
         } else {
             if (UI_Button(base + 5, "安装", UI_BTN_PRIMARY, UI_BTN_SM, false)) {
