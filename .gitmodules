@@ -1,0 +1,3 @@
+[submodule "kilnui"]
+	path = kilnui
+	url = git@github.com:dwapp/kilnui.git

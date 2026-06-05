@@ -30,3 +30,33 @@ target_link_libraries(linyaps_cli PRIVATE linyaps_store)
 
 enable_testing()
 add_test(NAME test_backend COMMAND test_backend)
+
+# ---- KilnUI (self-contained subdir, demos disabled) ----
+option(KILNUI_BUILD_DEMOS "Build KilnUI demos" OFF)
+set(CMAKE_C_STANDARD 23)   # kilnui requires C23
+add_subdirectory(kilnui)
+set(CMAKE_C_STANDARD 11)   # restore for our own code
+
+# ---- Store GUI application ----
+add_executable(linyaps_store_app
+    ui/main.c
+    ui/store_state.c
+    ui/store_ui.c)
+
+target_include_directories(linyaps_store_app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib
+    ${CMAKE_CURRENT_SOURCE_DIR}/kilnui/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/kilnui/3rdparty/clay)
+
+target_link_libraries(linyaps_store_app PRIVATE
+    linyaps_store
+    kilnui
+    ui_components)
+
+# Copy shader directory next to the binary so the renderer finds SPIRVs
+add_dependencies(linyaps_store_app shaders)
+add_custom_command(TARGET linyaps_store_app POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_BINARY_DIR}/shaders
+        $<TARGET_FILE_DIR:linyaps_store_app>/shaders
+    COMMENT "Copying shaders to output directory")
