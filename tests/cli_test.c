@@ -83,6 +83,15 @@ static void progress_cb(const LinyapsTaskProgress *progress, void *userdata)
            progress->message ? progress->message : "");
 }
 
+static void interaction_cb(const LinyapsInteractionRequest *request, void *userdata)
+{
+    LinyapsContext *ctx = userdata;
+    printf("interaction: %s -> %s\n",
+           request->local_ref ? request->local_ref : "",
+           request->remote_ref ? request->remote_ref : "");
+    linyaps_reply_interaction(ctx, request->object_path, true);
+}
+
 static void completion_cb(int error_code, const char *message, void *userdata)
 {
     (void)userdata;
@@ -132,6 +141,7 @@ int main(void)
     }
 
     CliState state = { 0 };
+    linyaps_set_interaction_callback(ctx, interaction_cb, ctx);
     char line[1024];
     print_help();
     for (;;) {

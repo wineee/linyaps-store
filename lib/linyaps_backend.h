@@ -48,6 +48,13 @@ void linyaps_update(LinyapsContext *ctx,
                     void *userdata);
 
 void linyaps_cancel_task(LinyapsContext *ctx, const char *task_object_path);
+void linyaps_reply_interaction(LinyapsContext *ctx,
+                               const char *task_object_path,
+                               bool accepted);
+
+void linyaps_set_interaction_callback(LinyapsContext *ctx,
+                                      LinyapsInteractionCallback cb,
+                                      void *userdata);
 
 void linyaps_prune(LinyapsContext *ctx,
                    LinyapsCompletionCallback cb,

@@ -40,8 +40,20 @@ typedef struct LinyapsTaskProgress {
     int error_code;
 } LinyapsTaskProgress;
 
+typedef struct LinyapsInteractionRequest {
+    char *object_path;
+    int message_id;
+    char *local_ref;
+    char *remote_ref;
+    char *summary;
+    char *body;
+} LinyapsInteractionRequest;
+
 typedef void (*LinyapsProgressCallback)(const LinyapsTaskProgress *progress,
                                         void *userdata);
+
+typedef void (*LinyapsInteractionCallback)(const LinyapsInteractionRequest *request,
+                                           void *userdata);
 
 typedef void (*LinyapsSearchCallback)(LinyapsPackageInfo **results,
                                       size_t count,

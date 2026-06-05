@@ -33,11 +33,15 @@ typedef struct SearchOp {
     struct SearchOp *next;
 } SearchOp;
 
+struct LinyapsContext;
+
 typedef struct {
     char *path;
+    struct LinyapsContext *ctx;
     LinyapsProgressCallback cb;
     void *userdata;
     sd_bus_slot *slot;
+    sd_bus_slot *interaction_slot;
     LinyapsTaskProgress progress;
     int active;
 } TaskEntry;
@@ -47,6 +51,8 @@ struct LinyapsContext {
     sd_bus_slot *task_added_slot;
     sd_bus_slot *task_removed_slot;
     sd_bus_slot *search_finished_slot;
+    LinyapsInteractionCallback interaction_cb;
+    void *interaction_userdata;
     PendingOp *pending_head;
     PendingOp *pending_tail;
     SearchOp *searches;
@@ -58,6 +64,19 @@ static int parse_search_reply(sd_bus_message *reply,
                               size_t *out_count,
                               int64_t *out_code,
                               char **out_message);
+static int read_variant_string(sd_bus_message *m, const char *sig, char **out);
+static void filter_store_search_results(LinyapsPackageInfo ***items, size_t *count);
+static char *configured_repos_csv(LinyapsContext *ctx);
+
+static void linyaps_interaction_request_clear(LinyapsInteractionRequest *request)
+{
+    free(request->object_path);
+    free(request->local_ref);
+    free(request->remote_ref);
+    free(request->summary);
+    free(request->body);
+    memset(request, 0, sizeof(*request));
+}
 
 static void free_string(char **s)
 {
@@ -371,7 +390,7 @@ static int append_package(sd_bus_message *m,
     return sd_bus_message_close_container(m);
 }
 
-static int append_options(sd_bus_message *m, int include_force, int force, int include_confirm)
+static int append_options(sd_bus_message *m, int include_force, int force, int include_skip)
 {
     int r = sd_bus_message_open_container(m, 'e', "sv");
     if (r < 0) {
@@ -392,7 +411,7 @@ static int append_options(sd_bus_message *m, int include_force, int force, int i
     if (include_force && (r = append_sv_bool(m, "force", force)) < 0) {
         return r;
     }
-    if (include_confirm && (r = append_sv_bool(m, "confirmInteraction", 0)) < 0) {
+    if (include_skip && (r = append_sv_bool(m, "skipInteraction", 0)) < 0) {
         return r;
     }
     r = sd_bus_message_close_container(m);
@@ -627,9 +646,79 @@ static void clear_task(TaskEntry *te)
         return;
     }
     te->slot = sd_bus_slot_unref(te->slot);
+    te->interaction_slot = sd_bus_slot_unref(te->interaction_slot);
     free_string(&te->path);
     progress_clear(&te->progress);
     memset(te, 0, sizeof(*te));
+}
+
+static int read_additional_message(sd_bus_message *m, LinyapsInteractionRequest *request)
+{
+    int r = sd_bus_message_enter_container(m, 'a', "{sv}");
+    if (r < 0) {
+        return r;
+    }
+    while ((r = sd_bus_message_enter_container(m, 'e', "sv")) > 0) {
+        const char *key = NULL;
+        char type = 0;
+        const char *sig = NULL;
+        sd_bus_message_read_basic(m, 's', &key);
+        sd_bus_message_peek_type(m, &type, &sig);
+        if (strcmp(key, "localRef") == 0 && sig && strcmp(sig, "s") == 0) {
+            read_variant_string(m, sig, &request->local_ref);
+        } else if (strcmp(key, "remoteRef") == 0 && sig && strcmp(sig, "s") == 0) {
+            read_variant_string(m, sig, &request->remote_ref);
+        } else {
+            sd_bus_message_skip(m, "v");
+        }
+        sd_bus_message_exit_container(m);
+    }
+    if (r < 0) {
+        return r;
+    }
+    return sd_bus_message_exit_container(m);
+}
+
+static int on_request_interaction(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
+{
+    (void)ret_error;
+    TaskEntry *te = userdata;
+    if (!te || !te->active) {
+        return 0;
+    }
+
+    LinyapsContext *ctx = te->ctx;
+
+    int32_t message_id = 0;
+    int r = sd_bus_message_read_basic(m, 'i', &message_id);
+    if (r < 0) {
+        return 0;
+    }
+
+    LinyapsInteractionRequest request = { 0 };
+    request.object_path = dupstr(te->path);
+    request.message_id = message_id;
+    r = read_additional_message(m, &request);
+    if (r < 0) {
+        linyaps_interaction_request_clear(&request);
+        return 0;
+    }
+
+    request.summary = dupstr("Package Manager needs confirmation.");
+    if (message_id == 1 && request.local_ref && request.remote_ref) {
+        const char *prefix = "The lower version is installed. Continue installing the newer version?";
+        request.body = dupstr(prefix);
+    } else {
+        request.body = dupstr("Confirm package manager operation.");
+    }
+
+    if (ctx && ctx->interaction_cb) {
+        ctx->interaction_cb(&request, ctx->interaction_userdata);
+    } else {
+        linyaps_reply_interaction(ctx, te->path, false);
+    }
+    linyaps_interaction_request_clear(&request);
+    return 0;
 }
 
 static int on_properties_changed(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
@@ -709,6 +798,7 @@ static int on_task_added(sd_bus_message *m, void *userdata, sd_bus_error *ret_er
     }
     memset(te, 0, sizeof(*te));
     te->active = 1;
+    te->ctx = ctx;
     te->path = dupstr(path);
     te->cb = cb;
     te->userdata = cb_userdata;
@@ -724,6 +814,17 @@ static int on_task_added(sd_bus_message *m, void *userdata, sd_bus_error *ret_er
     r = sd_bus_add_match(ctx->bus, &te->slot, match, on_properties_changed, te);
     if (r < 0) {
         notify_failed(cb, cb_userdata, "failed to subscribe task progress", r);
+        clear_task(te);
+        return 0;
+    }
+    snprintf(match,
+             sizeof(match),
+             "type='signal',interface='%s',member='RequestInteraction',path='%s'",
+             TASK_IFACE,
+             path);
+    r = sd_bus_add_match(ctx->bus, &te->interaction_slot, match, on_request_interaction, te);
+    if (r < 0) {
+        notify_failed(cb, cb_userdata, "failed to subscribe task interaction", r);
         clear_task(te);
         return 0;
     }
@@ -774,6 +875,9 @@ static int on_search_finished(sd_bus_message *m, void *userdata, sd_bus_error *r
     int64_t code = 0;
     char *message = NULL;
     r = parse_search_reply(m, &items, &count, &code, &message);
+    if (r >= 0 && code == 0) {
+        filter_store_search_results(&items, &count);
+    }
     if (op->cb) {
         op->cb(r < 0 || code != 0 ? NULL : items,
                r < 0 || code != 0 ? 0 : count,
@@ -1118,6 +1222,241 @@ static int parse_search_reply(sd_bus_message *reply,
     return 0;
 }
 
+static int read_version_number(const char **p, long long *value)
+{
+    while (**p && (**p < '0' || **p > '9')) {
+        (*p)++;
+    }
+    if (!**p) {
+        return 0;
+    }
+    char *end = NULL;
+    *value = strtoll(*p, &end, 10);
+    *p = end;
+    return 1;
+}
+
+static int compare_versions(const char *a, const char *b)
+{
+    if (!a && !b) {
+        return 0;
+    }
+    if (!a) {
+        return -1;
+    }
+    if (!b) {
+        return 1;
+    }
+
+    const char *pa = a;
+    const char *pb = b;
+    for (;;) {
+        long long va = 0;
+        long long vb = 0;
+        int ha = read_version_number(&pa, &va);
+        int hb = read_version_number(&pb, &vb);
+        if (!ha || !hb) {
+            break;
+        }
+        if (va < vb) {
+            return -1;
+        }
+        if (va > vb) {
+            return 1;
+        }
+    }
+    return strcmp(a, b);
+}
+
+static bool same_package_slot(const LinyapsPackageInfo *a, const LinyapsPackageInfo *b)
+{
+    const char *ar = a->repo ? a->repo : "";
+    const char *br = b->repo ? b->repo : "";
+    const char *ai = a->id ? a->id : "";
+    const char *bi = b->id ? b->id : "";
+    const char *am = a->module ? a->module : "";
+    const char *bm = b->module ? b->module : "";
+    return strcmp(ar, br) == 0 && strcmp(ai, bi) == 0 && strcmp(am, bm) == 0;
+}
+
+static void filter_store_search_results(LinyapsPackageInfo ***items, size_t *count)
+{
+    if (!items || !*items || !count) {
+        return;
+    }
+
+    LinyapsPackageInfo **list = *items;
+    size_t out = 0;
+    for (size_t i = 0; i < *count; i++) {
+        LinyapsPackageInfo *candidate = list[i];
+        if (!candidate) {
+            continue;
+        }
+        if (candidate->module && strcmp(candidate->module, "develop") == 0) {
+            linyaps_package_info_free(candidate);
+            continue;
+        }
+
+        size_t found = out;
+        for (size_t j = 0; j < out; j++) {
+            if (same_package_slot(list[j], candidate)) {
+                found = j;
+                break;
+            }
+        }
+        if (found == out) {
+            list[out++] = candidate;
+            continue;
+        }
+
+        if (compare_versions(list[found]->version, candidate->version) < 0) {
+            linyaps_package_info_free(list[found]);
+            list[found] = candidate;
+        } else {
+            linyaps_package_info_free(candidate);
+        }
+    }
+    *count = out;
+}
+
+static int csv_append(char **csv, const char *repo)
+{
+    if (!repo || !*repo) {
+        return 0;
+    }
+    size_t old_len = *csv ? strlen(*csv) : 0;
+    size_t add_len = strlen(repo);
+    char *next = realloc(*csv, old_len + add_len + (old_len ? 2 : 1));
+    if (!next) {
+        return -ENOMEM;
+    }
+    if (old_len) {
+        next[old_len++] = ',';
+    }
+    memcpy(next + old_len, repo, add_len + 1);
+    *csv = next;
+    return 0;
+}
+
+static int parse_repo_variant(sd_bus_message *m, char **csv)
+{
+    int r = sd_bus_message_enter_container(m, 'v', "a{sv}");
+    if (r < 0) {
+        return r;
+    }
+    r = sd_bus_message_enter_container(m, 'a', "{sv}");
+    if (r < 0) {
+        return r;
+    }
+    char *name = NULL;
+    char *alias = NULL;
+    while ((r = sd_bus_message_enter_container(m, 'e', "sv")) > 0) {
+        const char *key = NULL;
+        char type = 0;
+        const char *sig = NULL;
+        sd_bus_message_read_basic(m, 's', &key);
+        sd_bus_message_peek_type(m, &type, &sig);
+        if (strcmp(key, "alias") == 0) {
+            r = read_variant_string(m, sig, &alias);
+        } else if (strcmp(key, "name") == 0) {
+            r = read_variant_string(m, sig, &name);
+        } else {
+            r = sd_bus_message_skip(m, "v");
+        }
+        if (r < 0) {
+            free(name);
+            free(alias);
+            return r;
+        }
+        if ((r = sd_bus_message_exit_container(m)) < 0) {
+            free(name);
+            free(alias);
+            return r;
+        }
+    }
+    if (r < 0) {
+        free(name);
+        free(alias);
+        return r;
+    }
+    r = sd_bus_message_exit_container(m);
+    if (r >= 0) {
+        r = sd_bus_message_exit_container(m);
+    }
+    if (r >= 0) {
+        r = csv_append(csv, alias ? alias : name);
+    }
+    free(name);
+    free(alias);
+    return r;
+}
+
+static char *configured_repos_csv(LinyapsContext *ctx)
+{
+    sd_bus_error err = SD_BUS_ERROR_NULL;
+    sd_bus_message *reply = NULL;
+    char *csv = NULL;
+    int r = sd_bus_get_property(ctx->bus,
+                                PM_DEST,
+                                PM_PATH,
+                                PM_IFACE,
+                                "Configuration",
+                                &err,
+                                &reply,
+                                "a{sv}");
+    if (r < 0) {
+        sd_bus_error_free(&err);
+        sd_bus_message_unref(reply);
+        return NULL;
+    }
+
+    r = sd_bus_message_enter_container(reply, 'a', "{sv}");
+    while (r >= 0 && (r = sd_bus_message_enter_container(reply, 'e', "sv")) > 0) {
+        const char *key = NULL;
+        char type = 0;
+        const char *sig = NULL;
+        sd_bus_message_read_basic(reply, 's', &key);
+        sd_bus_message_peek_type(reply, &type, &sig);
+        if (strcmp(key, "repos") == 0 && sig && strcmp(sig, "av") == 0) {
+            r = sd_bus_message_enter_container(reply, 'v', "av");
+            if (r >= 0) {
+                r = sd_bus_message_enter_container(reply, 'a', "v");
+            }
+            while (r >= 0 && (r = sd_bus_message_peek_type(reply, &type, &sig)) > 0) {
+                if (type != 'v') {
+                    break;
+                }
+                r = parse_repo_variant(reply, &csv);
+                if (r < 0) {
+                    break;
+                }
+            }
+            if (r == 0) {
+                r = sd_bus_message_exit_container(reply);
+            }
+            if (r >= 0) {
+                r = sd_bus_message_exit_container(reply);
+            }
+        } else {
+            r = sd_bus_message_skip(reply, "v");
+        }
+        if (r < 0) {
+            break;
+        }
+        r = sd_bus_message_exit_container(reply);
+    }
+    if (r >= 0) {
+        sd_bus_message_exit_container(reply);
+    }
+    if (r < 0) {
+        free(csv);
+        csv = NULL;
+    }
+    sd_bus_error_free(&err);
+    sd_bus_message_unref(reply);
+    return csv;
+}
+
 void linyaps_search(LinyapsContext *ctx,
                     const char *keyword,
                     const char *repos,
@@ -1140,8 +1479,14 @@ void linyaps_search(LinyapsContext *ctx,
     if (r >= 0) {
         r = append_sv_string(m, "id", keyword);
     }
+    char *auto_repos = NULL;
     if (r >= 0) {
-        r = append_repos(m, repos && *repos ? repos : "stable");
+        const char *repo_arg = repos;
+        if (!repo_arg || !*repo_arg) {
+            auto_repos = configured_repos_csv(ctx);
+            repo_arg = auto_repos && *auto_repos ? auto_repos : "stable";
+        }
+        r = append_repos(m, repo_arg);
     }
     if (r >= 0) {
         r = sd_bus_message_close_container(m);
@@ -1153,6 +1498,7 @@ void linyaps_search(LinyapsContext *ctx,
         if (cb) {
             cb(NULL, 0, r, err.message ? err.message : strerror(-r), userdata);
         }
+        free(auto_repos);
         sd_bus_error_free(&err);
         sd_bus_message_unref(m);
         sd_bus_message_unref(reply);
@@ -1175,6 +1521,7 @@ void linyaps_search(LinyapsContext *ctx,
         search_push(ctx, job_id, cb, userdata);
     }
     free(job_id);
+    free(auto_repos);
     free(message);
     sd_bus_error_free(&err);
     sd_bus_message_unref(m);
@@ -1278,6 +1625,49 @@ void linyaps_cancel_task(LinyapsContext *ctx, const char *task_object_path)
     sd_bus_call_method(ctx->bus, PM_DEST, task_object_path, TASK_IFACE, "Cancel", &err, &reply, "");
     sd_bus_error_free(&err);
     sd_bus_message_unref(reply);
+}
+
+void linyaps_reply_interaction(LinyapsContext *ctx, const char *task_object_path, bool accepted)
+{
+    if (!ctx || !ctx->bus || !task_object_path) {
+        return;
+    }
+    sd_bus_message *m = NULL;
+    sd_bus_message *reply = NULL;
+    sd_bus_error err = SD_BUS_ERROR_NULL;
+    const char *action = accepted ? "yes" : "no";
+    int r = sd_bus_message_new_method_call(ctx->bus,
+                                           &m,
+                                           PM_DEST,
+                                           task_object_path,
+                                           TASK_IFACE,
+                                           "ReplyInteraction");
+    if (r >= 0) {
+        r = sd_bus_message_open_container(m, 'a', "{sv}");
+    }
+    if (r >= 0) {
+        r = append_sv_string(m, "action", action);
+    }
+    if (r >= 0) {
+        r = sd_bus_message_close_container(m);
+    }
+    if (r >= 0) {
+        sd_bus_call(ctx->bus, m, CALL_TIMEOUT_USEC, &err, &reply);
+    }
+    sd_bus_error_free(&err);
+    sd_bus_message_unref(m);
+    sd_bus_message_unref(reply);
+}
+
+void linyaps_set_interaction_callback(LinyapsContext *ctx,
+                                      LinyapsInteractionCallback cb,
+                                      void *userdata)
+{
+    if (!ctx) {
+        return;
+    }
+    ctx->interaction_cb = cb;
+    ctx->interaction_userdata = userdata;
 }
 
 void linyaps_prune(LinyapsContext *ctx, LinyapsCompletionCallback cb, void *userdata)
