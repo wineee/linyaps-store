@@ -5,6 +5,9 @@ set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+# Enable POSIX / GNU extensions for gettimeofday, localtime_r, etc.
+add_compile_definitions(_GNU_SOURCE)
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
 

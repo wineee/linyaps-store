@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-3.0-or-later */
 
 #include "linyaps_private.h"
+#include "linyaps_log.h"
 
 /* ------------------------------------------------------------------ */
 /* Context lifecycle                                                    */
@@ -101,11 +102,13 @@ void linyaps_search(LinyapsContext *ctx,
             auto_repos = configured_repos_csv(ctx);
             repo_arg = auto_repos && *auto_repos ? auto_repos : "stable";
         }
+        LOG_DEBUG("dbus", "Search keyword=%s repos=%s", keyword, repo_arg);
         r = append_repos(m, repo_arg);
     }
     if (r >= 0) r = sd_bus_message_close_container(m);
     if (r >= 0) r = sd_bus_call(ctx->bus, m, CALL_TIMEOUT_USEC, &err, &reply);
     if (r < 0) {
+        LOG_ERR("dbus", "Search D-Bus 调用失败: %s", err.message ? err.message : strerror(-r));
         if (cb) cb(NULL, 0, r, err.message ? err.message : strerror(-r), userdata);
         free(auto_repos);
         sd_bus_error_free(&err);
@@ -144,6 +147,11 @@ static void call_task_method(LinyapsContext *ctx,
                              LinyapsProgressCallback cb,
                              void *userdata)
 {
+    LOG_INFO("dbus", "%s: id=%s ver=%s ch=%s",
+             method,
+             app_id ? app_id : "(null)",
+             version ? version : "-",
+             channel ? channel : "-");
     if (!ctx || !ctx->bus || !app_id || !*app_id) {
         notify_failed(cb, userdata, "invalid package request", -EINVAL);
         return;
@@ -169,6 +177,7 @@ static void call_task_method(LinyapsContext *ctx,
     if (r >= 0) r = sd_bus_message_close_container(m);
     if (r >= 0) r = sd_bus_call(ctx->bus, m, CALL_TIMEOUT_USEC, &err, &reply);
     if (r < 0) {
+        LOG_ERR("dbus", "%s 调用失败: %s", method, err.message ? err.message : strerror(-r));
         pending_pop_tail(ctx);
         notify_failed(cb, userdata, err.message ? err.message : strerror(-r), r);
     } else {
@@ -176,8 +185,12 @@ static void call_task_method(LinyapsContext *ctx,
         char *message = NULL;
         int pr = parse_common_result(reply, &code, &message);
         if (pr < 0 || code != 0) {
+            LOG_ERR("dbus", "%s 返回错误: code=%lld msg=%s",
+                    method, (long long)code, message ? message : "");
             pending_pop_tail(ctx);
             notify_failed(cb, userdata, pr < 0 ? strerror(-pr) : message, pr < 0 ? pr : (int)code);
+        } else {
+            LOG_DEBUG("dbus", "%s 调用成功，等待任务信号", method);
         }
         free(message);
     }

@@ -20,6 +20,8 @@
 
 #include "../kilnui/src/kilnui.h"
 #include "../kilnui/src/ui/ui.h"
+#include "../lib/linyaps_backend.h"
+#include "../lib/linyaps_log.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -258,11 +260,30 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
             }
         }
 
-        /* Action button */
+        /* Action button — capture return value to handle clicks */
         if (installed) {
-            UI_Button(base + 5, "打开", UI_BTN_GHOST, UI_BTN_SM, false);
+            if (UI_Button(base + 5, "打开", UI_BTN_GHOST, UI_BTN_SM, false)) {
+                const char *app_id = info->id ? info->id : "(unknown)";
+                LOG_INFO("ui", "打开按钮点击: id=%s", app_id);
+                /* TODO: launch the application via ll-cli run <id> */
+            }
         } else {
-            UI_Button(base + 5, "安装", UI_BTN_PRIMARY, UI_BTN_SM, false);
+            if (UI_Button(base + 5, "安装", UI_BTN_PRIMARY, UI_BTN_SM, false)) {
+                const char *app_id = info->id ? info->id : "(unknown)";
+                LOG_INFO("ui", "安装按钮点击: id=%s ver=%s",
+                         app_id,
+                         info->version ? info->version : "-");
+                if (g_state->ctx) {
+                    linyaps_install(g_state->ctx,
+                                    info->id,
+                                    info->version,
+                                    info->channel,
+                                    NULL, NULL);
+                } else {
+                    LOG_WARN("ui", "后端未连接，无法安装 %s", app_id);
+                }
+                g_state->dirty = true;
+            }
         }
     }
 }

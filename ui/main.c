@@ -1,11 +1,10 @@
-/* ui/main.c — linyaps-store application entry point */
-
 #include "store_state.h"
 #include "store_ui.h"
 
 #include "../kilnui/src/kilnui.h"
 #include "../kilnui/src/ui/ui.h"
 #include "../lib/linyaps_backend.h"
+#include "../lib/linyaps_log.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -24,8 +23,14 @@ static void on_search_results(LinyapsPackageInfo **items,
                                const char *message,
                                void *userdata)
 {
-    (void)message;
     StoreState *s = userdata;
+
+    if (error_code != 0) {
+        LOG_WARN("search", "搜索失败: code=%d msg=%s",
+                 error_code, message ? message : "");
+    } else {
+        LOG_INFO("search", "搜索结果: count=%zu", count);
+    }
 
     linyaps_package_info_list_free(s->search_results, s->search_count);
 
@@ -65,6 +70,7 @@ static void handle_key(StoreState *s, SDL_Keycode key)
         s->dirty = true;
     } else if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
         if (s->search_buf[0] && s->ctx) {
+            LOG_INFO("search", "开始搜索: keyword=\"%s\"", s->search_buf);
             linyaps_search(s->ctx, s->search_buf, NULL, on_search_results, s);
         }
         s->search_focused = false;
@@ -96,7 +102,11 @@ int main(int argc, char *argv[])
 
     /* ---- Backend init ---- */
     LinyapsContext *lctx = linyaps_context_new();
-    /* lctx may be NULL if the daemon is not running – UI still works */
+    if (lctx) {
+        LOG_INFO("main", "D-Bus 后端初始化成功");
+    } else {
+        LOG_WARN("main", "D-Bus 后端初始化失败，UI 将在离线模式运行");
+    }
 
     /* ---- App state ---- */
     StoreState store;
@@ -108,6 +118,7 @@ int main(int argc, char *argv[])
     /* Pre-populate with installed packages */
     if (lctx) {
         store.installed_list = linyaps_list_installed(lctx, &store.installed_count);
+        LOG_INFO("main", "已安装应用: count=%zu", store.installed_count);
         /* Show installed list as default content */
         store.search_results = store.installed_list;
         store.search_count   = store.installed_count;
