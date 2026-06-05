@@ -13,7 +13,12 @@ add_library(cjson STATIC
 target_include_directories(cjson PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/cjson)
 
-add_library(linyaps_store STATIC lib/linyaps_backend.c)
+add_library(linyaps_store STATIC
+    lib/linyaps_util.c
+    lib/linyaps_dbus_msg.c
+    lib/linyaps_task.c
+    lib/linyaps_context.c
+    lib/linyaps_cli.c)
 target_include_directories(linyaps_store PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib)
 target_link_libraries(linyaps_store PUBLIC PkgConfig::SYSTEMD PRIVATE cjson)
 
