@@ -165,7 +165,7 @@ int main(int argc, char *argv[])
     };
     const char *font = KilnUI_find_font(fonts);
     if (!font) { SDL_Log("No font found"); return 1; }
-    if (!KilnUI_init(&ctx, "玲珑应用商店", 1060, 660, font, 14)) return 1;
+    if (!KilnUI_init(&ctx, "玲珑应用商店", 2556, 1478, font, 14)) return 1;
 
     /* ---- Register custom SDL event type for background threads ---- */
     g_user_event_type = SDL_RegisterEvents(1);
