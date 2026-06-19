@@ -1067,7 +1067,23 @@ static void content_area(void)
                              g_state->search_count);
                     CLAY_TEXT(UI__str(header_str), { .textColor = ds_theme->text, .fontSize = DS_FS_LG });
                 }
-            } else {
+            } else if (g_state->active_nav == NAV_RECOMMENDED) {
+                CLAY(CLAY_SIDI(CLAY_STRING("RecommendHeader"), ID_STATUS + 410), {
+                    .layout = {
+                        .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44) },
+                        .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                        .childAlignment  = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                        .padding         = { DS_SPACE_4, DS_SPACE_4, 0, 0 },
+                    },
+                    .backgroundColor = ds_theme->base,
+                    .border = {
+                        .color = ds_theme->surface0,
+                        .width = { .bottom = 1 },
+                    },
+                }) {
+                    CLAY_TEXT(CLAY_STRING("推荐"), { .textColor = ds_theme->text, .fontSize = DS_FS_LG });
+                }
+            } else if (g_state->active_nav == NAV_ALL) {
                 category_tab_bar();
             }
 
