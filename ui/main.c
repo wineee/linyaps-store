@@ -512,6 +512,7 @@ static void handle_key(StoreState *s, SDL_Keycode key)
     } else if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
         if (s->search_buf[0]) {
             LOG_INFO("search", "开始搜索: keyword=\"%s\"", s->search_buf);
+            s->current_page = 0;  /* 搜索时重置页码 */
             start_remote_fetch(s->search_buf, NULL, 1);
         }
         s->search_focused = false;
@@ -548,6 +549,8 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
             if (res->is_search) {
                 /* Search results: match if keyword still matches current search_buf */
                 matches = (data_str && strcmp(data_str, store->search_buf) == 0);
+                LOG_INFO("remote", "搜索结果到达: keyword=\"%s\" current_buf=\"%s\" page=%d current_page=%d matches=%d",
+                         data_str ? data_str : "", store->search_buf, res->page, store->current_page, matches);
             } else {
                 /* Category browse: match if category still matches current nav */
                 const char *current_cat = current_remote_category();
@@ -555,8 +558,10 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
                           (data_str && current_cat && strcmp(data_str, current_cat) == 0);
             }
             /* Also check that the page matches what we expect */
-            if (matches && store->current_page != res->page - 1)
+            if (matches && store->current_page != res->page - 1) {
+                LOG_INFO("remote", "页码不匹配: expected=%d got=%d", store->current_page, res->page - 1);
                 matches = false;
+            }
 
             if (matches) {
                 if (store->search_results != store->installed_list)
@@ -570,6 +575,10 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
                 }
                 SDL_SetAtomicInt(&store->loading_remote, 0);
                 SDL_SetAtomicInt(&store->dirty, 1);
+                LOG_INFO("remote", "更新 search_results: count=%zu total=%ld ptr=%p", res->count, res->total, (void*)res->list);
+                for (size_t i = 0; i < res->count && i < 5; i++) {
+                    LOG_INFO("remote", "  [%zu] id=%s name=%s", i, res->list[i]->id, res->list[i]->name);
+                }
             } else {
                 linyaps_package_info_list_free(res->list, res->count);
             }

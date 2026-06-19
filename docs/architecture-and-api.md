@@ -201,6 +201,8 @@ remote rankings (newest / downloads)
 
 We communicate with the remote community store API `https://storeapi.linyaps.org.cn` to fetch catalog search results and rankings.
 
+**IMPORTANT**: The search endpoint (`/visit/getSearchAppList`) expects the keyword field to be named **`name`**, not `keyword`. See Flutter implementation: `lib/data/models/api_dto.dart` line 452. Using the wrong field name causes the API to return all apps (same as welcome page) instead of filtered results.
+
 ```c
 typedef enum {
     LINYAPS_RANKING_NEWEST = 0,

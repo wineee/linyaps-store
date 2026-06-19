@@ -399,6 +399,80 @@ linyaps_remote_fetch_apps(..., g_state->current_page + 1, ...);
 
 ---
 
+## 11. 多个 UI_Input 互相干扰导致键盘输入失效
+
+### 症状
+
+组件画廊（`component_gallery`）中，点击 "Click to focus name" 输入框后，键盘输入无效。`SDL_EVENT_TEXT_INPUT` 事件完全不产生。而单独的 `input_demo`（只有一个输入框）正常工作。
+
+### 根因
+
+`UI_Input` 内部用**全局静态变量** `s_text_input_active` 跟踪 SDL 文本输入状态。当页面有多个 `UI_Input` 时，每帧按顺序调用：
+
+```
+frame N:
+  UI_Input(name)  focused=true  → SDL_StartTextInput() → s_text_input_active = true
+  UI_Input(email) focused=false → SDL_StopTextInput()  → s_text_input_active = false  ← 把 name 刚开的关掉了！
+
+frame N+1:
+  UI_Input(name)  focused=true  → SDL_StartTextInput() → s_text_input_active = true
+  UI_Input(email) focused=false → SDL_StopTextInput()  → s_text_input_active = false
+  ... 每帧重复
+```
+
+结果：`SDL_StartTextInput` 每帧都被调用，但下一帧又被另一个输入框的 `StopTextInput` 关掉，`SDL_EVENT_TEXT_INPUT` 永远不会产生。
+
+### 修复
+
+用 `uid` 跟踪**哪个输入框持有焦点**，只有焦点持有者才能控制 SDL 文本输入：
+
+```c
+static int  s_focused_uid = -1;  /* -1 = 没有输入框持有焦点 */
+static bool s_text_input_active = false;
+
+// UI_Input 内部：
+bool new_focused = clicked ? true : focused;
+if (new_focused && s_focused_uid != uid) {
+    s_focused_uid = uid;  /* 抢占焦点 */
+}
+bool is_owner = (s_focused_uid == uid);
+
+if (new_focused && is_owner && !s_text_input_active) {
+    SDL_StartTextInput(window);
+    s_text_input_active = true;
+} else if (!new_focused && s_focused_uid == uid) {
+    s_focused_uid = -1;  /* 释放焦点 */
+    if (s_text_input_active) {
+        SDL_StopTextInput(window);
+        s_text_input_active = false;
+    }
+}
+```
+
+### 事件处理时序陷阱
+
+此外，`SDL_EVENT_TEXT_INPUT` 事件在**事件循环**中到达，但输入框的焦点状态在 `ui_build()`（事件循环之后）才更新。因此 TEXT_INPUT 事件到达时，焦点标志可能还是旧值。
+
+**解决**：将 TEXT_INPUT 和 KEY_DOWN 事件放入队列，在 `ui_build()` 之后处理：
+
+```c
+/* 事件循环中：只排队 */
+} else if (e.type == SDL_EVENT_TEXT_INPUT) {
+    text_queue[len++] = e.text.text;
+}
+
+/* ui_build() 之后：处理队列（此时焦点状态已更新） */
+for (int i = 0; i < len; i++) {
+    if (g_focused) append_to_buffer(text_queue[i]);
+}
+```
+
+### 教训
+
+> **规则**：当页面有多个可聚焦 Widget 且共享全局状态（如 `s_text_input_active`）时，必须用 **owner id** 跟踪谁持有焦点，避免其他 Widget 意外修改全局状态。另外，**事件处理**（在事件循环中）和**状态更新**（在 UI 布局中）存在时序差，需要排队延迟处理。
+
+---
+
 ## 参考
 
 - `kilnui/3rdparty/clay/clay.h` — floating 元素行为、`Clay_BorderElementConfig`

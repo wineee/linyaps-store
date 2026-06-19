@@ -301,7 +301,8 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
 {
     cJSON *req = new_page_request(page, page_size);
     if (!req) return NULL;
-    cJSON_AddStringToObject(req, "keyword", keyword ? keyword : "");
+    /* 后端期望字段名是 "name"，不是 "keyword" */
+    cJSON_AddStringToObject(req, "name", keyword ? keyword : "");
     if (category_id && *category_id)
         cJSON_AddStringToObject(req, "categoryId", category_id);
 
