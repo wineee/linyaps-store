@@ -35,12 +35,12 @@
 /* Layout constants                                                    */
 /* ------------------------------------------------------------------ */
 
-#define SIDEBAR_W         160
-#define CARD_H            72
+#define SIDEBAR_W         180
+#define CARD_H            88
 #define ICON_PLACEHOLDER  48
-#define GRID_MIN_CARD_W   300
-#define GRID_TARGET_CARD_W 360
-#define GRID_MAX_CARD_W   460
+#define GRID_MIN_CARD_W   320
+#define GRID_TARGET_CARD_W 380
+#define GRID_MAX_CARD_W   480
 #define GRID_MAX_COLS     6
 #define TITLEBAR_H        52
 #define CONTENT_HEADER_H  44

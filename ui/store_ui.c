@@ -198,7 +198,7 @@ static void content_area(void)
                         NAV_LABELS[g_state->active_nav], g_state->search_count);
                     CLAY_TEXT(UI__str(hdr), { .textColor = ds_theme->text, .fontSize = DS_FS_LG });
                 }
-            } else if (g_state->active_nav == NAV_RECOMMENDED) {
+            } else if (g_state->active_nav == NAV_RECOMMENDED && !g_state->is_searching) {
                 CLAY(CLAY_SIDI(CLAY_STRING("RecommendHeader"), ID_STATUS + 410), {
                     .layout = {
                         .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44) },
@@ -211,8 +211,23 @@ static void content_area(void)
                 }) {
                     CLAY_TEXT(CLAY_STRING("推荐"), { .textColor = ds_theme->text, .fontSize = DS_FS_LG });
                 }
-            } else if (g_state->active_nav == NAV_ALL) {
+            } else if (g_state->active_nav == NAV_ALL && !g_state->is_searching) {
                 view_category_tab_bar();
+            }
+
+            if (g_state->is_searching) {
+                CLAY(CLAY_SIDI(CLAY_STRING("SearchHeader"), ID_STATUS + 420), {
+                    .layout = {
+                        .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44) },
+                        .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                        .childAlignment  = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                        .padding         = { DS_SPACE_4, DS_SPACE_4, 0, 0 },
+                    },
+                    .backgroundColor = ds_theme->base,
+                }) {
+                    const char *hdr = store_ui_frame_str("找到 %zu 个结果", g_state->search_count);
+                    CLAY_TEXT(UI__str(hdr), { .textColor = ds_theme->subtext, .fontSize = DS_FS_SM });
+                }
             }
 
             CLAY(CLAY_SIDI(CLAY_STRING("GridWrap"), ID_ROOT + 3), {

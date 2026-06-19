@@ -25,6 +25,7 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
     }) {
         icon_placeholder(base + 1, ICON_PLACEHOLDER);
 
+        /* Text block: name + description (Expanded to fill available space) */
         CLAY(CLAY_SIDI(CLAY_STRING("CardText"), base + 2), {
             .layout = {
                 .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
@@ -43,6 +44,7 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
             }
         }
 
+        /* Action button — at the right edge */
         if (installed) {
             if (UI_Button(base + 5, "打开", UI_BTN_SECONDARY, UI_BTN_SM, false)) {
                 const char *app_id = info->id ? info->id : NULL;
@@ -227,6 +229,14 @@ void view_app_grid(void)
         }
 
         UI_SPACER(ID_STATUS + 80);
+
+        if (g_state->is_searching && count > 0) {
+            UI_ROW(ID_STATUS + 800, DS_SPACE_3) {
+                UI_SPACER(ID_STATUS + 801);
+                CLAY_TEXT(CLAY_STRING("没有更多了"), { .textColor = ds_theme->muted, .fontSize = DS_FS_SM });
+                UI_SPACER(ID_STATUS + 802);
+            }
+        }
 
         if (total_pages > 1) {
             UI_ROW(ID_STATUS + 81, DS_SPACE_3) {

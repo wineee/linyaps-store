@@ -364,10 +364,11 @@ void store_ui_trigger_update_all(void)
 
 void store_ui_trigger_change_nav(NavItem item)
 {
-    if (g_store->active_nav == item) return;
+    if (g_store->active_nav == item && !g_store->is_searching) return;
     g_store->active_nav = item;
     g_store->current_page = 0;
     g_store->remote_total = 0;
+    g_store->is_searching = false;
     SDL_SetAtomicInt(&g_store->dirty, 1);
 
     if (item == NAV_RANKING) {
@@ -399,14 +400,27 @@ void store_ui_trigger_change_ranking_tab(int tab_idx)
     g_store->ranking_tab = tab_idx;
     g_store->current_page = 0;
     SDL_SetAtomicInt(&g_store->dirty, 1);
+    start_ranking_fetch(tab_idx, 1);
+}
 
-    if (g_store->ranking_list) {
-        linyaps_package_info_list_free(g_store->ranking_list, g_store->ranking_count);
-        g_store->ranking_list  = NULL;
-        g_store->ranking_count = 0;
+void store_ui_trigger_clear_search(void)
+{
+    if (!g_store) return;
+    g_store->search_buf[0] = '\0';
+    g_store->is_searching = false;
+    SDL_SetAtomicInt(&g_store->dirty, 1);
+
+    /* Restore view based on current nav */
+    NavItem item = g_store->active_nav;
+    if (item == NAV_RANKING) {
+        start_ranking_fetch(g_store->ranking_tab, g_store->current_page + 1);
+    } else if (item >= NAV_CAT_OFFICE && item <= NAV_CAT_GAMES) {
+        start_remote_fetch(get_category_id_by_nav(item), 1);
+    } else if (item == NAV_ALL) {
+        start_remote_fetch(get_category_id_by_tab(g_store->active_cat), 1);
+    } else if (item == NAV_RECOMMENDED) {
+        start_remote_fetch("__welcome__", 1);
     }
-    g_store->ranking_total = 0;
-    start_ranking_fetch(tab_idx, g_store->current_page + 1);
 }
 
 void store_ui_trigger_change_ranking_page(int page_idx)
@@ -462,9 +476,12 @@ static void on_search_results(LinyapsPackageInfo **items,
         s->search_results = items;
         s->search_count   = count;
         s->current_page   = 0;
+        s->is_searching   = true;
+        strncpy(s->last_search_keyword, s->search_buf, sizeof(s->last_search_keyword) - 1);
     } else {
         s->search_results = NULL;
         s->search_count   = 0;
+        s->is_searching   = false;
     }
     SDL_SetAtomicInt(&s->dirty, 1);
 }

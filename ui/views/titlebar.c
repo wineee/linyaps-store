@@ -34,7 +34,7 @@ void view_titlebar(void)
             TY_Text(ID_TITLEBAR + 3, "玲珑应用商店", TY_H4);
         }
 
-        /* Search bar */
+        /* Search bar — UI_Input handles its own styling and click detection */
         CLAY(CLAY_SIDI(CLAY_STRING("SearchWrap"), ID_SEARCH), {
             .layout = {
                 .sizing         = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(DS_HEIGHT_SM) },
@@ -44,7 +44,7 @@ void view_titlebar(void)
             UIInputResult ir = UI_Input(ID_SEARCH + 1,
                                         NULL,
                                         g_state->search_buf,
-                                        "在这里搜索您想搜索的应用",
+                                        "搜索应用",
                                         g_state->search_focused,
                                         false);
             if (ir.clicked) {

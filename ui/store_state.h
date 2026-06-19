@@ -104,7 +104,9 @@ typedef struct {
 
     /* search */
     char search_buf[256];
+    char last_search_keyword[256];
     bool search_focused;
+    bool is_searching;
 
     /* package data */
     LinyapsPackageInfo **search_results;

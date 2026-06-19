@@ -79,11 +79,10 @@ void view_sidebar(void)
         UI_SPACER(ID_SIDEBAR + 20);
 
         UI_Divider(ID_SIDEBAR + 21);
-        UI_ROW(ID_SIDEBAR + 22, DS_SPACE_2) {
-            UI_IconButton(ID_SIDEBAR + 23, ICON_HOME,       DS_FS_LG, UI_BTN_GHOST, false);
-            UI_IconButton(ID_SIDEBAR + 24, ICON_ARROW_DOWN, DS_FS_LG, UI_BTN_GHOST, false);
-            UI_SPACER(ID_SIDEBAR + 25);
-            UI_IconButton(ID_SIDEBAR + 26, ICON_SETTINGS,   DS_FS_LG, UI_BTN_GHOST, false);
+        UI_ROW(ID_SIDEBAR + 22, DS_SPACE_1) {
+            UI_IconButton(ID_SIDEBAR + 23, "\xf0\x9f\x93\x81", DS_FS_LG, UI_BTN_GHOST, false);
+            UI_IconButton(ID_SIDEBAR + 24, "\xe2\xac\x87", DS_FS_LG, UI_BTN_GHOST, false);
+            UI_IconButton(ID_SIDEBAR + 26, "\xe2\x9a\x99", DS_FS_LG, UI_BTN_GHOST, false);
         }
     }
 }
