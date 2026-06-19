@@ -118,6 +118,8 @@ typedef struct LinyapsPackageInfo {
     char    *description, *kind, *module, *base, *runtime;
     char    *schema_version, *command;
     int64_t  size;
+    char    *create_time;
+    int64_t  download_count;
 } LinyapsPackageInfo;  // 所有字符串由结构体持有，free 时一并释放
 
 typedef struct LinyapsTaskProgress {

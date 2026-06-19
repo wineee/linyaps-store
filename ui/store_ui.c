@@ -685,6 +685,52 @@ static void updates_view(void)
     }
 }
 
+static const char *format_release_time(const char *create_time)
+{
+    if (!create_time || strlen(create_time) < 10) return "刚刚上架";
+
+    /* parse YYYY-MM-DD */
+    int y = 0, m = 0, d = 0;
+    if (sscanf(create_time, "%d-%d-%d", &y, &m, &d) != 3) {
+        return "刚刚上架";
+    }
+
+    /* current date is 2026-06-19 */
+    int cur_y = 2026, cur_m = 6, cur_d = 19;
+
+    int days = (cur_y - y) * 365 + (cur_m - m) * 30 + (cur_d - d);
+    if (days < 0) days = 0;
+
+    static char buf[64];
+    if (days == 0) {
+        return "今天上架";
+    } else if (days < 30) {
+        snprintf(buf, sizeof(buf), "%d天前上架", days);
+        return buf;
+    } else if (days < 365) {
+        snprintf(buf, sizeof(buf), "%d个月前上架", days / 30);
+        return buf;
+    } else {
+        snprintf(buf, sizeof(buf), "%d年前上架", days / 365);
+        return buf;
+    }
+}
+
+static const char *format_download_count(int64_t count)
+{
+    static char buf[64];
+    if (count <= 0) {
+        return "暂无下载";
+    } else if (count < 1000) {
+        snprintf(buf, sizeof(buf), "下载 %ld次", (long)count);
+    } else if (count < 1000000) {
+        snprintf(buf, sizeof(buf), "下载 %ld,%03ld次", (long)(count / 1000), (long)(count % 1000));
+    } else {
+        snprintf(buf, sizeof(buf), "下载 %.1f万次", (double)count / 10000.0);
+    }
+    return buf;
+}
+
 static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *info, bool installed)
 {
     int base = ID_CARD_BASE + 20000 + card_idx * 20;
@@ -750,15 +796,16 @@ static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *i
         }
         letter_icon_placeholder(base + 1, ICON_PLACEHOLDER, letter);
 
-        /* Text block: name + description */
+        /* Text block: name + description + meta */
         CLAY(CLAY_SIDI(CLAY_STRING("RankCardText"), base + 2), {
             .layout = {
                 .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
                 .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                .childGap        = 4,
+                .childGap        = 2,
             },
         }) {
             TY_Text(base + 3, info->name ? info->name : info->id, TY_H4);
+
             CLAY(CLAY_SIDI(CLAY_STRING("RankCardDesc"), base + 4), {
                 .layout = {
                     .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
@@ -768,6 +815,21 @@ static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *i
                 const char *desc = info->description ? info->description : "";
                 CLAY_TEXT(UI__str(desc),
                           { .textColor = ds_theme->subtext, .fontSize = DS_FS_SM });
+            }
+
+            CLAY(CLAY_SIDI(CLAY_STRING("RankCardMeta"), base + 6), {
+                .layout = {
+                    .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
+                },
+            }) {
+                const char *meta_str = "";
+                if (g_state->ranking_tab == 0) {
+                    meta_str = format_release_time(info->create_time);
+                } else {
+                    meta_str = format_download_count(info->download_count);
+                }
+                CLAY_TEXT(UI__str(meta_str),
+                          { .textColor = ds_theme->muted, .fontSize = DS_FS_SM });
             }
         }
 
@@ -895,7 +957,7 @@ static void ranking_view(void)
                                     break;
                                 }
                             }
-                            ranking_app_card((int)i, (int)(i + 1), g_state->ranking_list[i], inst);
+                            ranking_app_card((int)i, (int)(g_state->current_page * 30 + i + 1), g_state->ranking_list[i], inst);
                         }
                         /* Fill empty columns in last row */
                         for (int col = (int)(count - i); col > 0 && col < 3 && (count % 3 != 0) && i >= count; col++) {
@@ -905,6 +967,38 @@ static void ranking_view(void)
                         }
                     }
                     row_idx++;
+                }
+            }
+
+            /* Pagination Controls */
+            long total_pages = (g_state->ranking_total + 29) / 30;
+            if (total_pages < 1) total_pages = 1;
+            int cur_p = g_state->current_page;
+
+            CLAY(CLAY_SIDI(CLAY_STRING("RankingPaginationWrap"), ID_STATUS + 900), {
+                .layout = {
+                    .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
+                    .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                    .childAlignment  = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                    .childGap        = DS_SPACE_4,
+                    .padding         = { 0, 0, DS_SPACE_2, DS_SPACE_2 },
+                },
+            }) {
+                /* Previous page button */
+                bool prev_disabled = (cur_p <= 0);
+                if (UI_Button(ID_STATUS + 901, "< 上一页", UI_BTN_SECONDARY, UI_BTN_SM, prev_disabled)) {
+                    store_ui_trigger_change_ranking_page(cur_p - 1);
+                }
+
+                /* Page indicator text */
+                char page_str[64];
+                snprintf(page_str, sizeof(page_str), "第 %d / %ld 页", cur_p + 1, total_pages);
+                CLAY_TEXT(UI__str(page_str), { .textColor = ds_theme->text, .fontSize = DS_FS_MD });
+
+                /* Next page button */
+                bool next_disabled = (cur_p >= total_pages - 1);
+                if (UI_Button(ID_STATUS + 902, "下一页 >", UI_BTN_SECONDARY, UI_BTN_SM, next_disabled)) {
+                    store_ui_trigger_change_ranking_page(cur_p + 1);
                 }
             }
         }

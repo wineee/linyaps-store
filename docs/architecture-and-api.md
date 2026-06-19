@@ -143,6 +143,8 @@ typedef struct LinyapsPackageInfo {
     char *schema_version;
     char *command;
     int64_t size;
+    char *create_time;
+    int64_t download_count;
 } LinyapsPackageInfo;
 ```
 

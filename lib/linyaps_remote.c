@@ -141,6 +141,11 @@ static LinyapsRemoteAppInfo *parse_record(const cJSON *obj)
     info->category_id   = jdup(obj, "categoryId");
     info->category_name = jdup(obj, "categoryName");
 
+    info->base.create_time = jdup(obj, "createTime");
+    if (!info->base.create_time) info->base.create_time = jdup(obj, "updateTime");
+    info->base.download_count = jint64(obj, "installCount");
+    if (info->base.download_count == 0) info->base.download_count = jint64(obj, "downloadTimes");
+
     /* Prefer zh_name as the display name when available */
     if (info->zh_name && *info->zh_name && !info->base.name) {
         info->base.name = strdup(info->zh_name);
@@ -282,6 +287,7 @@ void linyaps_remote_app_info_free(LinyapsRemoteAppInfo *info)
     free(info->base.runtime);
     free(info->base.schema_version);
     free(info->base.command);
+    free(info->base.create_time);
     /* remote-only fields */
     free(info->icon_url);
     free(info->zh_name);
@@ -306,8 +312,10 @@ LinyapsPackageInfo *linyaps_remote_app_info_to_package_info(const LinyapsRemoteA
     DUP(id); DUP(name); DUP(version); DUP(arch); DUP(channel);
     DUP(repo); DUP(description); DUP(kind); DUP(module);
     DUP(base); DUP(runtime); DUP(schema_version); DUP(command);
+    DUP(create_time);
 #undef DUP
     p->size = info->base.size;
+    p->download_count = info->base.download_count;
     return p;
 }
 

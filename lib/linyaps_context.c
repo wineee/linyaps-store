@@ -310,6 +310,7 @@ void linyaps_package_info_free(LinyapsPackageInfo *info)
     free(info->runtime);
     free(info->schema_version);
     free(info->command);
+    free(info->create_time);
     free(info);
 }
 

@@ -124,6 +124,7 @@ typedef struct {
     bool                 loading_ranking;
     LinyapsPackageInfo **ranking_list;
     size_t               ranking_count;
+    long                 ranking_total;
 
     /* pagination */
     int current_page;

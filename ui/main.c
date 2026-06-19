@@ -27,6 +27,7 @@
 typedef struct {
     LinyapsPackageInfo **list;
     size_t               count;
+    long                 total;
 } RemoteResult;
 
 static StoreState *g_store = NULL;
@@ -242,14 +243,18 @@ static void start_remote_fetch(void)
 
 static void *fetch_ranking_thread(void *arg)
 {
-    int tab_type = (int)(intptr_t)arg;
+    uintptr_t val = (uintptr_t)arg;
+    int tab_type = val & 0xFF;
+    int page = (val >> 8) & 0xFFFF;
+    if (page == 0) page = 1;
+
     size_t count = 0;
     long   total = 0;
 
     LinyapsRankingType rtype = (tab_type == 0) ? LINYAPS_RANKING_NEWEST : LINYAPS_RANKING_DOWNLOADS;
 
     LinyapsRemoteAppInfo **remote = linyaps_remote_fetch_ranking(
-        rtype, 1, 100, &count, &total);
+        rtype, page, 30, &count, &total);
 
     /* Convert to LinyapsPackageInfo** */
     LinyapsPackageInfo **list = NULL;
@@ -262,19 +267,20 @@ static void *fetch_ranking_thread(void *arg)
         linyaps_remote_app_info_list_free(remote, count);
     }
 
-    LOG_INFO("ranking", "排行远端拉取完成: type=%d count=%zu total=%ld", tab_type, count, total);
+    LOG_INFO("ranking", "排行远端拉取完成: type=%d page=%d count=%zu total=%ld", tab_type, page, count, total);
 
     /* Post result back to the main thread via SDL user event */
     RemoteResult *res = malloc(sizeof(*res));
     if (res) {
         res->list  = list;
         res->count = count;
+        res->total = total;
         SDL_Event ev;
         SDL_zero(ev);
         ev.type       = g_user_event_type;
         ev.user.code  = EVT_RANKING_READY;
         ev.user.data1 = res;
-        ev.user.data2 = (void*)(intptr_t)tab_type;
+        ev.user.data2 = (void*)val;
         SDL_PushEvent(&ev);
     } else {
         linyaps_package_info_list_free(list, count);
@@ -282,16 +288,18 @@ static void *fetch_ranking_thread(void *arg)
     return NULL;
 }
 
-static void start_ranking_fetch(int tab_type)
+static void start_ranking_fetch(int tab_type, int page)
 {
     g_store->loading_ranking = true;
     g_store->dirty = true;
+
+    uintptr_t val = (tab_type & 0xFF) | ((page & 0xFFFF) << 8);
 
     pthread_t tid;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    if (pthread_create(&tid, &attr, fetch_ranking_thread, (void*)(intptr_t)tab_type) != 0) {
+    if (pthread_create(&tid, &attr, fetch_ranking_thread, (void*)val) != 0) {
         LOG_WARN("ranking", "无法创建后台排行拉取线程");
         g_store->loading_ranking = false;
     }
@@ -306,8 +314,7 @@ void store_ui_trigger_change_nav(NavItem item)
     g_store->dirty = true;
 
     if (item == NAV_RANKING) {
-        /* Fetch ranking list for current active tab if not loaded or switch */
-        start_ranking_fetch(g_store->ranking_tab);
+        start_ranking_fetch(g_store->ranking_tab, g_store->current_page + 1);
     }
 }
 
@@ -324,8 +331,25 @@ void store_ui_trigger_change_ranking_tab(int tab_idx)
         g_store->ranking_list = NULL;
         g_store->ranking_count = 0;
     }
+    g_store->ranking_total = 0;
 
-    start_ranking_fetch(tab_idx);
+    start_ranking_fetch(tab_idx, g_store->current_page + 1);
+}
+
+void store_ui_trigger_change_ranking_page(int page_idx)
+{
+    if (page_idx < 0) return;
+    g_store->current_page = page_idx;
+    g_store->dirty = true;
+
+    /* Free old ranking list */
+    if (g_store->ranking_list) {
+        linyaps_package_info_list_free(g_store->ranking_list, g_store->ranking_count);
+        g_store->ranking_list = NULL;
+        g_store->ranking_count = 0;
+    }
+
+    start_ranking_fetch(g_store->ranking_tab, page_idx + 1);
 }
 
 /* ------------------------------------------------------------------ */
@@ -495,16 +519,19 @@ int main(int argc, char *argv[])
                 e.type == g_user_event_type &&
                 e.user.code == EVT_RANKING_READY) {
                 RemoteResult *res = e.user.data1;
-                int tab_type = (int)(intptr_t)e.user.data2;
+                uintptr_t val = (uintptr_t)e.user.data2;
+                int tab_type = val & 0xFF;
+                int page = (val >> 8) & 0xFFFF;
                 if (res) {
-                    LOG_INFO("main", "排行数据到达, type=%d count=%zu", tab_type, res->count);
-                    /* Only apply if the current active ranking tab matches the response type */
-                    if (store.ranking_tab == tab_type) {
+                    LOG_INFO("main", "排行数据到达, type=%d page=%d count=%zu total=%ld", tab_type, page, res->count, res->total);
+                    /* Only apply if the current active ranking tab and page match */
+                    if (store.ranking_tab == tab_type && store.current_page == (page - 1)) {
                         if (store.ranking_list) {
                             linyaps_package_info_list_free(store.ranking_list, store.ranking_count);
                         }
                         store.ranking_list = res->list;
                         store.ranking_count = res->count;
+                        store.ranking_total = res->total;
                         store.loading_ranking = false;
                         store.dirty = true;
                     } else {
