@@ -51,6 +51,12 @@ void view_titlebar(void)
                 g_state->search_focused = true;
                 SDL_SetAtomicInt(&g_state->dirty, 1);
             }
+            /* Release focus when clicking outside the search input */
+            if (UI__mouse_released && !ir.clicked && g_state->search_focused) {
+                g_state->search_focused = false;
+                UI_Input_ResetFocus();
+                SDL_SetAtomicInt(&g_state->dirty, 1);
+            }
         }
 
         UI_SPACER(ID_TITLEBAR + 10);

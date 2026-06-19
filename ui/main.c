@@ -28,6 +28,7 @@ typedef struct {
     size_t               count;
     long                 total;
     int                  page;
+    bool                 is_search;  /* true = keyword search, false = category browse */
 } RemoteResult;
 
 static StoreState *g_store = NULL;
@@ -75,16 +76,14 @@ static const char *get_category_id_by_tab(CategoryTab tab)
     }
 }
 
-/* ================================================================== */
-/* Background threads (remote fetch, ranking, updates)                 */
-/* ================================================================== */
 
 /* ------------------------------------------------------------------ */
 /* Remote app list fetch thread                                        */
 /* ------------------------------------------------------------------ */
 
-/* Argument for fetch_remote_thread: owns category_id string */
+/* Argument for fetch_remote_thread: owns keyword and category_id strings */
 typedef struct {
+    char *keyword;
     char *category_id;
     int   page;
 } RemoteFetchArg;
@@ -92,6 +91,7 @@ typedef struct {
 static void *fetch_remote_thread(void *arg)
 {
     RemoteFetchArg *farg = arg;
+    char *keyword    = farg->keyword;
     char *category_id = farg->category_id;
     int   page = farg->page;
     free(farg);
@@ -103,7 +103,7 @@ static void *fetch_remote_thread(void *arg)
     if (category_id && strcmp(category_id, "__welcome__") == 0) {
         remote = linyaps_remote_fetch_welcome_apps(page, 30, &count, &total);
     } else {
-        remote = linyaps_remote_fetch_apps("", category_id, page, 30, &count, &total);
+        remote = linyaps_remote_fetch_apps(keyword ? keyword : "", category_id, page, 30, &count, &total);
     }
 
     LinyapsPackageInfo **list = NULL;
@@ -116,21 +116,27 @@ static void *fetch_remote_thread(void *arg)
         linyaps_remote_app_info_list_free(remote, count);
     }
 
-    LOG_INFO("remote", "远端拉取完成: category=%s page=%d count=%zu total=%ld",
-             category_id ? category_id : "NULL", page, count, total);
+    bool is_search = (keyword && *keyword);
+    LOG_INFO("remote", "远端拉取完成: keyword=%s category=%s page=%d count=%zu total=%ld",
+             keyword ? keyword : "", category_id ? category_id : "NULL", page, count, total);
 
     RemoteResult *res = malloc(sizeof(*res));
     if (res) {
         res->list = list; res->count = count; res->total = total; res->page = page;
-        post_user_event(EVT_REMOTE_READY, res, category_id);
+        res->is_search = is_search;
+        /* Pass keyword (if search) or category_id (if browse) as data2 */
+        post_user_event(EVT_REMOTE_READY, res, is_search ? keyword : category_id);
     } else {
         linyaps_package_info_list_free(list, count);
+        free(keyword);
         free(category_id);
     }
+    /* Free the one NOT passed as data2 */
+    if (is_search) free(category_id); else free(keyword);
     return NULL;
 }
 
-static void start_remote_fetch(const char *category_id, int page)
+static void start_remote_fetch(const char *keyword, const char *category_id, int page)
 {
     SDL_SetAtomicInt(&g_store->loading_remote, 1);
     SDL_SetAtomicInt(&g_store->dirty, 1);
@@ -140,6 +146,7 @@ static void start_remote_fetch(const char *category_id, int page)
         SDL_SetAtomicInt(&g_store->loading_remote, 0);
         return;
     }
+    farg->keyword     = keyword ? strdup(keyword) : NULL;
     farg->category_id = category_id ? strdup(category_id) : NULL;
     farg->page = page;
 
@@ -149,6 +156,7 @@ static void start_remote_fetch(const char *category_id, int page)
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     if (pthread_create(&tid, &attr, fetch_remote_thread, farg) != 0) {
         LOG_WARN("remote", "无法创建后台远端拉取线程");
+        free(farg->keyword);
         free(farg->category_id);
         free(farg);
         SDL_SetAtomicInt(&g_store->loading_remote, 0);
@@ -298,9 +306,6 @@ static void start_simulated_update(StoreUpdateItem *item)
 
 #endif /* LINYAPS_SIMULATE_UPDATES */
 
-/* ================================================================== */
-/* Public triggers (called from store_ui)                              */
-/* ================================================================== */
 
 void store_ui_trigger_check_updates(void)
 {
@@ -374,13 +379,13 @@ void store_ui_trigger_change_nav(NavItem item)
     if (item == NAV_RANKING) {
         start_ranking_fetch(g_store->ranking_tab, g_store->current_page + 1);
     } else if (item >= NAV_CAT_OFFICE && item <= NAV_CAT_GAMES) {
-        start_remote_fetch(get_category_id_by_nav(item), 1);
+        start_remote_fetch(NULL, get_category_id_by_nav(item), 1);
     } else if (item == NAV_ALL) {
         g_store->active_cat = CAT_ALL;
-        start_remote_fetch(NULL, 1);
+        start_remote_fetch(NULL, NULL, 1);
     } else if (item == NAV_RECOMMENDED) {
         g_store->active_cat = CAT_ALL;
-        start_remote_fetch("__welcome__", 1);
+        start_remote_fetch(NULL, "__welcome__", 1);
     }
 }
 
@@ -391,7 +396,7 @@ void store_ui_trigger_change_category_tab(CategoryTab tab)
     g_store->current_page = 0;
     g_store->remote_total = 0;
     SDL_SetAtomicInt(&g_store->dirty, 1);
-    start_remote_fetch(get_category_id_by_tab(tab), 1);
+    start_remote_fetch(NULL, get_category_id_by_tab(tab), 1);
 }
 
 void store_ui_trigger_change_ranking_tab(int tab_idx)
@@ -415,11 +420,11 @@ void store_ui_trigger_clear_search(void)
     if (item == NAV_RANKING) {
         start_ranking_fetch(g_store->ranking_tab, g_store->current_page + 1);
     } else if (item >= NAV_CAT_OFFICE && item <= NAV_CAT_GAMES) {
-        start_remote_fetch(get_category_id_by_nav(item), 1);
+        start_remote_fetch(NULL, get_category_id_by_nav(item), 1);
     } else if (item == NAV_ALL) {
-        start_remote_fetch(get_category_id_by_tab(g_store->active_cat), 1);
+        start_remote_fetch(NULL, get_category_id_by_tab(g_store->active_cat), 1);
     } else if (item == NAV_RECOMMENDED) {
-        start_remote_fetch("__welcome__", 1);
+        start_remote_fetch(NULL, "__welcome__", 1);
     }
 }
 
@@ -451,12 +456,9 @@ void store_ui_trigger_remote_page(int page_idx)
 {
     if (page_idx < 0) return;
     g_store->current_page = page_idx;
-    start_remote_fetch(current_remote_category(), page_idx + 1);
+    start_remote_fetch(NULL, current_remote_category(), page_idx + 1);
 }
 
-/* ================================================================== */
-/* Search callback                                                     */
-/* ================================================================== */
 
 static void on_search_results(LinyapsPackageInfo **items,
                                size_t count,
@@ -486,9 +488,6 @@ static void on_search_results(LinyapsPackageInfo **items,
     SDL_SetAtomicInt(&s->dirty, 1);
 }
 
-/* ================================================================== */
-/* Text input handling                                                 */
-/* ================================================================== */
 
 static void handle_text_input(StoreState *s, const char *text)
 {
@@ -511,18 +510,15 @@ static void handle_key(StoreState *s, SDL_Keycode key)
         s->search_focused = false;
         SDL_SetAtomicInt(&s->dirty, 1);
     } else if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
-        if (s->search_buf[0] && s->ctx) {
+        if (s->search_buf[0]) {
             LOG_INFO("search", "开始搜索: keyword=\"%s\"", s->search_buf);
-            linyaps_search(s->ctx, s->search_buf, NULL, on_search_results, s);
+            start_remote_fetch(s->search_buf, NULL, 1);
         }
         s->search_focused = false;
         SDL_SetAtomicInt(&s->dirty, 1);
     }
 }
 
-/* ================================================================== */
-/* Event handling — split into SDL input events & user (thread) events  */
-/* ================================================================== */
 
 /* ---- Mouse/input state shared across event handlers ---- */
 typedef struct {
@@ -546,11 +542,18 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
     /* ---- Remote app list arrived ---- */
     case EVT_REMOTE_READY: {
         RemoteResult *res = e->user.data1;
-        char *category_id = e->user.data2;
+        char *data_str = e->user.data2;  /* keyword (if search) or category_id (if browse) */
         if (res) {
-            const char *current_cat = current_remote_category();
-            bool matches = (!category_id && !current_cat) ||
-                           (category_id && current_cat && strcmp(category_id, current_cat) == 0);
+            bool matches = false;
+            if (res->is_search) {
+                /* Search results: match if keyword still matches current search_buf */
+                matches = (data_str && strcmp(data_str, store->search_buf) == 0);
+            } else {
+                /* Category browse: match if category still matches current nav */
+                const char *current_cat = current_remote_category();
+                matches = (!data_str && !current_cat) ||
+                          (data_str && current_cat && strcmp(data_str, current_cat) == 0);
+            }
             /* Also check that the page matches what we expect */
             if (matches && store->current_page != res->page - 1)
                 matches = false;
@@ -561,6 +564,10 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
                 store->search_results = res->list;
                 store->search_count   = res->count;
                 store->remote_total   = res->total;
+                if (res->is_search) {
+                    store->is_searching = true;
+                    strncpy(store->last_search_keyword, data_str, sizeof(store->last_search_keyword) - 1);
+                }
                 SDL_SetAtomicInt(&store->loading_remote, 0);
                 SDL_SetAtomicInt(&store->dirty, 1);
             } else {
@@ -568,7 +575,7 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
             }
             free(res);
         }
-        free(category_id);
+        free(data_str);
         return true;
     }
 
@@ -693,7 +700,6 @@ static bool handle_sdl_event(StoreState *store, KilnUI *ui,
         input->mouse_released = true;
         input->mx = e->button.x;
         input->my = e->button.y;
-        store->search_focused = false;
     } else if (e->type == SDL_EVENT_TEXT_INPUT && store->search_focused) {
         handle_text_input(store, e->text.text);
     } else if (e->type == SDL_EVENT_KEY_DOWN) {
@@ -704,9 +710,6 @@ static bool handle_sdl_event(StoreState *store, KilnUI *ui,
     return true;
 }
 
-/* ================================================================== */
-/* Main                                                                */
-/* ================================================================== */
 
 int main(int argc, char *argv[])
 {
@@ -725,6 +728,9 @@ int main(int argc, char *argv[])
     const char *font = KilnUI_find_font(fonts);
     if (!font) { SDL_Log("No font found"); return 1; }
     if (!KilnUI_init(&ctx, "玲珑应用商店", 2556, 1478, font, 14)) return 1;
+
+    /* Tell UI_Input which window to use for SDL text input */
+    UI_SetTextInputWindow(ctx.window);
 
     /* ---- Register custom SDL event type ---- */
     g_user_event_type = SDL_RegisterEvents(1);
@@ -753,7 +759,7 @@ int main(int argc, char *argv[])
     }
 
     LOG_INFO("main", "启动远端应用列表拉取...");
-    start_remote_fetch("__welcome__", 1);
+    start_remote_fetch(NULL, "__welcome__", 1);
 
     /* ---- Event loop ---- */
     InputState input = { false, false, 0, 0 };
