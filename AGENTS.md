@@ -286,6 +286,7 @@ ctest --test-dir build
 | `docs/dbus-policy-and-polkit.md` | 系统总线策略、polkit 授权、测试绕过方案 |
 | `docs/icon-source.md` | 图标来源分析（本地无图标，需远端 API 补全） |
 | `docs/testing.md` | 构建命令、CLI 命令、真实环境验证 |
+| `docs/kilnui-pitfalls.md` | Clay / KilnUI 踩坑记录：floating 渲染顺序、BORDER 命令、uniform 对齐等 |
 
 **AI 更新规则**：当代码中新增接口、修改架构或发现新的 D-Bus 行为时，同步更新对应的 `docs/` 文档和本文件。
 

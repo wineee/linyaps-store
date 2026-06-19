@@ -19,6 +19,9 @@ This directory records the implementation research used to build the
     for a pure local/D-Bus store.
 - [testing.md](testing.md)
   - Build commands, CLI commands and real-environment validation notes.
+- [kilnui-pitfalls.md](kilnui-pitfalls.md)
+  - 踩坑记录：Clay floating 渲染顺序、BORDER 命令未实现、uniform 块对齐、
+    attachTo 缺失、渲染命令数量上限、Clay_String 生命周期、分页偏移等。
 
 ## Current scope
 
