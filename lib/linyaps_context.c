@@ -136,7 +136,7 @@ void linyaps_search(LinyapsContext *ctx,
 }
 
 /* ------------------------------------------------------------------ */
-/* Install / Uninstall / Update (shared internal helper)               */
+/* Install / Uninstall (shared internal helper)                         */
 /* ------------------------------------------------------------------ */
 
 static void call_task_method(LinyapsContext *ctx,
@@ -219,12 +219,68 @@ void linyaps_uninstall(LinyapsContext *ctx,
     call_task_method(ctx, "Uninstall", app_id, version, channel, cb, userdata);
 }
 
+/* ------------------------------------------------------------------ */
+/* Update (special format: packages array + appOnly + depsOnly)        */
+/* ------------------------------------------------------------------ */
+
 void linyaps_update(LinyapsContext *ctx,
                     const char *app_id,
                     LinyapsProgressCallback cb,
                     void *userdata)
 {
-    call_task_method(ctx, "Update", app_id, NULL, NULL, cb, userdata);
+    LOG_INFO("dbus", "Update: id=%s", app_id ? app_id : "(null)");
+    if (!ctx || !ctx->bus || !app_id || !*app_id) {
+        notify_failed(cb, userdata, "invalid package request", -EINVAL);
+        return;
+    }
+    pending_push(ctx, cb, userdata);
+    sd_bus_message *m = NULL;
+    sd_bus_message *reply = NULL;
+    sd_bus_error err = SD_BUS_ERROR_NULL;
+    int r = sd_bus_message_new_method_call(ctx->bus, &m, PM_DEST, PM_PATH, PM_IFACE, "Update");
+    if (r >= 0) r = sd_bus_message_open_container(m, 'a', "{sv}");
+    /* packages: variant containing av (array of variants, each wrapping a{sv}) */
+    if (r >= 0) {
+        r = sd_bus_message_open_container(m, 'e', "sv");
+        if (r >= 0) r = sd_bus_message_append_basic(m, 's', "packages");
+        if (r >= 0) r = sd_bus_message_open_container(m, 'v', "av");
+        if (r >= 0) r = sd_bus_message_open_container(m, 'a', "v");
+        if (r >= 0) r = sd_bus_message_open_container(m, 'v', "a{sv}");
+        if (r >= 0) r = sd_bus_message_open_container(m, 'a', "{sv}");
+        if (r >= 0) r = append_sv_string(m, "id", app_id);
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close a{sv} */
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close v(a{sv}) */
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close a(v) */
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close v(av) */
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close dict entry */
+    }
+    /* appOnly: false */
+    if (r >= 0) r = append_sv_bool(m, "appOnly", 0);
+    /* depsOnly: false */
+    if (r >= 0) r = append_sv_bool(m, "depsOnly", 0);
+    if (r >= 0) r = sd_bus_message_close_container(m);  /* close a{sv} */
+    if (r >= 0) r = sd_bus_call(ctx->bus, m, CALL_TIMEOUT_USEC, &err, &reply);
+    if (r < 0) {
+        LOG_ERR("dbus", "Update 调用失败: %s", err.message ? err.message : strerror(-r));
+        pending_pop_tail(ctx);
+        notify_failed(cb, userdata, err.message ? err.message : strerror(-r), r);
+    } else {
+        int64_t code = 0;
+        char *message = NULL;
+        int pr = parse_common_result(reply, &code, &message);
+        if (pr < 0 || code != 0) {
+            LOG_ERR("dbus", "Update 返回错误: code=%lld msg=%s",
+                    (long long)code, message ? message : "");
+            pending_pop_tail(ctx);
+            notify_failed(cb, userdata, pr < 0 ? strerror(-pr) : message, pr < 0 ? pr : (int)code);
+        } else {
+            LOG_DEBUG("dbus", "Update 调用成功，等待任务信号");
+        }
+        free(message);
+    }
+    sd_bus_error_free(&err);
+    sd_bus_message_unref(m);
+    sd_bus_message_unref(reply);
 }
 
 /* ------------------------------------------------------------------ */
