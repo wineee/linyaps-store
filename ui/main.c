@@ -561,9 +561,11 @@ int main(int argc, char *argv[])
                     LOG_INFO("main", "远端列表到达，刷新显示 count=%zu", res->count);
                     
                     const char *current_cat = NULL;
-                    if (store.active_nav >= NAV_CAT_OFFICE && store.active_nav <= NAV_CAT_GAMES) {
+                    if (store.active_nav == NAV_RECOMMENDED) {
+                        current_cat = "__welcome__";
+                    } else if (store.active_nav >= NAV_CAT_OFFICE && store.active_nav <= NAV_CAT_GAMES) {
                         current_cat = get_category_id_by_nav(store.active_nav);
-                    } else if (store.active_nav == NAV_ALL || store.active_nav == NAV_RECOMMENDED) {
+                    } else if (store.active_nav == NAV_ALL) {
                         current_cat = get_category_id_by_tab(store.active_cat);
                     }
 
