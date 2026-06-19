@@ -215,6 +215,12 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
     size_t *out_count,
     long   *out_total);
 
+LinyapsRemoteAppInfo **linyaps_remote_fetch_welcome_apps(
+    int page,
+    int page_size,
+    size_t *out_count,
+    long   *out_total);
+
 LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(
     LinyapsRankingType type,
     int                page,

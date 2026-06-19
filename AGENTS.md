@@ -93,6 +93,7 @@ void linyaps_package_info_list_free(LinyapsPackageInfo **list, size_t count);
 
 /* 远端 Store API */
 LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(keyword, category_id, page, page_size, out_count, out_total);
+LinyapsRemoteAppInfo **linyaps_remote_fetch_welcome_apps(page, page_size, out_count, out_total);
 LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(type, page, page_size, out_count, out_total);
 ```
 
