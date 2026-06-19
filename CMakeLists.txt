@@ -30,11 +30,27 @@ target_link_libraries(linyaps_store PUBLIC PkgConfig::SYSTEMD PkgConfig::CURL PR
 add_executable(test_backend tests/test_backend.c)
 target_link_libraries(test_backend PRIVATE linyaps_store)
 
+add_executable(test_util tests/test_util.c)
+target_link_libraries(test_util PRIVATE linyaps_store)
+
+add_executable(test_filter tests/test_filter.c)
+target_include_directories(test_filter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/lib)
+target_link_libraries(test_filter PRIVATE linyaps_store PkgConfig::SYSTEMD)
+
 add_executable(linyaps_cli tests/cli_test.c)
 target_link_libraries(linyaps_cli PRIVATE linyaps_store)
 
 enable_testing()
 add_test(NAME test_backend COMMAND test_backend)
+add_test(NAME test_util   COMMAND test_util)
+add_test(NAME test_filter COMMAND test_filter)
+
+# 一键编译+运行所有测试
+add_custom_target(run_tests
+    COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+    DEPENDS test_backend test_util test_filter
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running all tests")
 
 # ---- KilnUI (self-contained subdir, demos disabled) ----
 option(KILNUI_BUILD_DEMOS "Build KilnUI demos" OFF)
