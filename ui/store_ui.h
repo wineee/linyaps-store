@@ -11,3 +11,8 @@ void store_ui_build(StoreState *state);
 /* Handle actions that must affect the whole frame before layout commands
  * are generated, such as switching the active design-system theme. */
 void store_ui_handle_pre_layout_actions(StoreState *state, bool mouse_released);
+
+/* Update action triggers */
+void store_ui_trigger_check_updates(void);
+void store_ui_trigger_update_all(void);
+void store_ui_trigger_update_item(StoreUpdateItem *item);

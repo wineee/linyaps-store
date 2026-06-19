@@ -18,7 +18,10 @@
 /* ------------------------------------------------------------------ */
 
 /* Custom SDL user event types */
-#define EVT_REMOTE_READY  0u   /* remote app list arrived */
+#define EVT_REMOTE_READY          0u   /* remote app list arrived */
+#define EVT_CHECK_UPDATES_READY   1u   /* check updates finished */
+#define EVT_UPDATE_ITEM_PROGRESS  2u   /* update progress update */
+#define EVT_UPDATE_ITEM_FINISHED  3u   /* update finished */
 
 typedef struct {
     LinyapsPackageInfo **list;
@@ -27,6 +30,162 @@ typedef struct {
 
 static StoreState *g_store = NULL;
 static Uint32      g_user_event_type = 0;
+
+/* ------------------------------------------------------------------ */
+/* Updates triggers & simulation                                       */
+/* ------------------------------------------------------------------ */
+
+static void *check_updates_thread(void *arg)
+{
+    (void)arg;
+    SDL_Delay(1500); /* simulate 1.5 seconds check time */
+
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = g_user_event_type;
+    ev.user.code = EVT_CHECK_UPDATES_READY;
+    SDL_PushEvent(&ev);
+
+    return NULL;
+}
+
+void store_ui_trigger_check_updates(void)
+{
+    if (!g_store || g_store->checking_updates) return;
+    g_store->checking_updates = true;
+    g_store->dirty = true;
+
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&tid, &attr, check_updates_thread, NULL);
+    pthread_attr_destroy(&attr);
+}
+
+typedef struct {
+    StoreState *store;
+    StoreUpdateItem *item;
+} SimulatedUpdateTask;
+
+static void *simulate_update_thread(void *arg)
+{
+    SimulatedUpdateTask *task = arg;
+    StoreUpdateItem *item = task->item;
+
+    float p = 0.0f;
+    while (p < 1.0f) {
+        SDL_Delay(100);
+        p += 0.05f;
+        if (p > 1.0f) p = 1.0f;
+
+        item->progress = p;
+
+        SDL_Event ev;
+        SDL_zero(ev);
+        ev.type = g_user_event_type;
+        ev.user.code = EVT_UPDATE_ITEM_PROGRESS;
+        ev.user.data1 = item;
+        SDL_PushEvent(&ev);
+    }
+
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = g_user_event_type;
+    ev.user.code = EVT_UPDATE_ITEM_FINISHED;
+    ev.user.data1 = item;
+    SDL_PushEvent(&ev);
+
+    free(task);
+    return NULL;
+}
+
+static void on_update_progress(const LinyapsTaskProgress *prog, void *userdata)
+{
+    StoreUpdateItem *item = userdata;
+    if (!item || !g_store) return;
+
+    item->progress = (float)prog->percentage;
+
+    if (prog->state == LINYAPS_TASK_STATE_SUCCEED) {
+        SDL_Event ev;
+        SDL_zero(ev);
+        ev.type = g_user_event_type;
+        ev.user.code = EVT_UPDATE_ITEM_FINISHED;
+        ev.user.data1 = item;
+        SDL_PushEvent(&ev);
+    } else if (prog->state == LINYAPS_TASK_STATE_FAILED || prog->state == LINYAPS_TASK_STATE_CANCELED) {
+        item->updating = false;
+        item->progress = 0.0f;
+        SDL_Event ev;
+        SDL_zero(ev);
+        ev.type = g_user_event_type;
+        ev.user.code = EVT_UPDATE_ITEM_FINISHED;
+        ev.user.data1 = item;
+        SDL_PushEvent(&ev);
+    } else {
+        SDL_Event ev;
+        SDL_zero(ev);
+        ev.type = g_user_event_type;
+        ev.user.code = EVT_UPDATE_ITEM_PROGRESS;
+        ev.user.data1 = item;
+        SDL_PushEvent(&ev);
+    }
+}
+
+void store_ui_trigger_update_item(StoreUpdateItem *item)
+{
+    if (!g_store || !item || item->updating) return;
+
+    item->updating = true;
+    item->progress = 0.0f;
+    g_store->dirty = true;
+
+    bool use_simulation = true;
+
+    if (g_store->ctx) {
+        /* Check if the package is installed locally first */
+        bool installed = false;
+        for (size_t i = 0; i < g_store->installed_count; i++) {
+            if (g_store->installed_list[i] && g_store->installed_list[i]->id &&
+                strcmp(g_store->installed_list[i]->id, item->id) == 0) {
+                installed = true;
+                break;
+            }
+        }
+        if (installed) {
+            linyaps_update(g_store->ctx, item->id, on_update_progress, item);
+            use_simulation = false;
+        }
+    }
+
+    if (use_simulation) {
+        SimulatedUpdateTask *task = malloc(sizeof(*task));
+        if (task) {
+            task->store = g_store;
+            task->item = item;
+
+            pthread_t tid;
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+            pthread_create(&tid, &attr, simulate_update_thread, task);
+            pthread_attr_destroy(&attr);
+        } else {
+            item->updating = false;
+        }
+    }
+}
+
+void store_ui_trigger_update_all(void)
+{
+    if (!g_store) return;
+    for (size_t i = 0; i < g_store->update_count; i++) {
+        if (!g_store->update_list[i].updating) {
+            store_ui_trigger_update_item(&g_store->update_list[i]);
+        }
+    }
+}
 
 static void *fetch_remote_thread(void *arg)
 {
@@ -239,6 +398,89 @@ int main(int argc, char *argv[])
                     store.dirty = true;
                     free(res);
                 }
+                continue;
+            }
+
+            /* ---- Check Updates completed ---- */
+            if (g_user_event_type != (Uint32)-1 &&
+                e.type == g_user_event_type &&
+                e.user.code == EVT_CHECK_UPDATES_READY) {
+                store.checking_updates = false;
+                if (store.update_count == 0) {
+                    /* Repopulate mock data so the user can test updates again */
+                    store.update_count = 3;
+                    store.update_list = calloc(store.update_count, sizeof(*store.update_list));
+                    if (store.update_list) {
+                        store.update_list[0] = (StoreUpdateItem){
+                            .id = strdup("cn.wps.wps-office"),
+                            .name = strdup("WPS Office For Linux 个人版"),
+                            .current_version = strdup("12.1.2.25882"),
+                            .new_version = strdup("12.1.2.26885"),
+                            .channel = strdup("main"),
+                        };
+                        store.update_list[1] = (StoreUpdateItem){
+                            .id = strdup("com.microsoft.edge"),
+                            .name = strdup("Microsoft Edge"),
+                            .current_version = strdup("148.0.3967.86"),
+                            .new_version = strdup("149.0.4022.69"),
+                            .channel = strdup("main"),
+                        };
+                        store.update_list[2] = (StoreUpdateItem){
+                            .id = strdup("org.localsend.localsend"),
+                            .name = strdup("LocalSend"),
+                            .current_version = strdup("1.17.0.3"),
+                            .new_version = strdup("1.17.0.5"),
+                            .channel = strdup("main"),
+                        };
+                    }
+                }
+                store.dirty = true;
+                continue;
+            }
+
+            /* ---- Update Item Progress ---- */
+            if (g_user_event_type != (Uint32)-1 &&
+                e.type == g_user_event_type &&
+                e.user.code == EVT_UPDATE_ITEM_PROGRESS) {
+                store.dirty = true;
+                continue;
+            }
+
+            /* ---- Update Item Finished ---- */
+            if (g_user_event_type != (Uint32)-1 &&
+                e.type == g_user_event_type &&
+                e.user.code == EVT_UPDATE_ITEM_FINISHED) {
+                StoreUpdateItem *item = e.user.data1;
+                if (item) {
+                    /* Remove the completed update item from list */
+                    size_t match_idx = (size_t)-1;
+                    for (size_t i = 0; i < store.update_count; i++) {
+                        if (&store.update_list[i] == item) {
+                            match_idx = i;
+                            break;
+                        }
+                    }
+                    if (match_idx != (size_t)-1) {
+                        /* Free the removed item string fields */
+                        free(store.update_list[match_idx].id);
+                        free(store.update_list[match_idx].name);
+                        free(store.update_list[match_idx].current_version);
+                        free(store.update_list[match_idx].new_version);
+                        free(store.update_list[match_idx].channel);
+                        free(store.update_list[match_idx].task_path);
+
+                        /* Shift remaining items */
+                        for (size_t i = match_idx; i < store.update_count - 1; i++) {
+                            store.update_list[i] = store.update_list[i + 1];
+                        }
+                        store.update_count--;
+                        if (store.update_count == 0) {
+                            free(store.update_list);
+                            store.update_list = NULL;
+                        }
+                    }
+                }
+                store.dirty = true;
                 continue;
             }
 

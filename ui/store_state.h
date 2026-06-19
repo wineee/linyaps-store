@@ -77,6 +77,17 @@ typedef struct {
     bool  installing;
 } AppEntry;
 
+typedef struct {
+    char *id;
+    char *name;
+    char *current_version;
+    char *new_version;
+    char *channel;
+    bool updating;
+    float progress;
+    char *task_path;
+} StoreUpdateItem;
+
 /* ------------------------------------------------------------------ */
 /* Global store state                                                   */
 /* ------------------------------------------------------------------ */
@@ -98,6 +109,12 @@ typedef struct {
     size_t               search_count;
     LinyapsPackageInfo **installed_list;
     size_t               installed_count;
+
+    /* updates */
+    StoreUpdateItem *update_list;
+    size_t           update_count;
+    bool             checking_updates;
+    float            check_updates_timer;
 
     /* theme */
     bool dark_mode;

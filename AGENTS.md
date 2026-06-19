@@ -211,6 +211,12 @@ typedef struct {
     LinyapsPackageInfo **search_results; size_t search_count;
     LinyapsPackageInfo **installed_list; size_t installed_count;
 
+    /* updates */
+    StoreUpdateItem *update_list;
+    size_t           update_count;
+    bool             checking_updates;
+    float            check_updates_timer;
+
     bool dark_mode;
     bool dirty;   // 脏标志驱动渲染，false 时跳过 CPU 重布局
 } StoreState;
