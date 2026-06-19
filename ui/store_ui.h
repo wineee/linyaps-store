@@ -19,3 +19,4 @@ void store_ui_trigger_update_item(StoreUpdateItem *item);
 void store_ui_trigger_change_nav(NavItem item);
 void store_ui_trigger_change_ranking_tab(int tab_idx);
 void store_ui_trigger_change_ranking_page(int page_idx);
+void store_ui_trigger_change_category_tab(CategoryTab tab);

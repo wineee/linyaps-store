@@ -235,9 +235,7 @@ static void category_tab_bar(void)
             bool hov = Clay_PointerOver(eid);
 
             if (hov && UI__mouse_released) {
-                g_state->active_cat = (CategoryTab)i;
-                g_state->current_page = 0;
-                g_state->dirty      = true;
+                store_ui_trigger_change_category_tab((CategoryTab)i);
             }
 
             Clay_Color bg = active ? ds_theme->surface1
@@ -347,6 +345,21 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
 
 static void app_grid(void)
 {
+    if (g_state->loading_remote) {
+        CLAY(CLAY_SIDI(CLAY_STRING("GridLoading"), ID_STATUS + 110), {
+            .layout = {
+                .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(200) },
+                .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                .childGap = DS_SPACE_3,
+            }
+        }) {
+            TY_Text(ID_STATUS + 111, ICON_SPINNER, TY_DISPLAY);
+            TY_TextColored(ID_STATUS + 112, "正在加载应用列表...", TY_BODY, ds_theme->muted);
+        }
+        return;
+    }
+
     LinyapsPackageInfo **list = g_state->search_results;
     size_t count              = g_state->search_count;
 
@@ -1033,7 +1046,30 @@ static void content_area(void)
                 ranking_view();
             }
         } else {
-            category_tab_bar();
+            bool is_sidebar_cat = (g_state->active_nav >= NAV_CAT_OFFICE && g_state->active_nav <= NAV_CAT_GAMES);
+            if (is_sidebar_cat) {
+                CLAY(CLAY_SIDI(CLAY_STRING("CatHeader"), ID_STATUS + 400), {
+                    .layout = {
+                        .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(44) },
+                        .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                        .childAlignment  = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                        .padding         = { DS_SPACE_4, DS_SPACE_4, 0, 0 },
+                    },
+                    .backgroundColor = ds_theme->base,
+                    .border = {
+                        .color = ds_theme->surface0,
+                        .width = { .bottom = 1 },
+                    },
+                }) {
+                    char header_str[64];
+                    snprintf(header_str, sizeof(header_str), "%s (%zu)",
+                             NAV_LABELS[g_state->active_nav],
+                             g_state->search_count);
+                    CLAY_TEXT(UI__str(header_str), { .textColor = ds_theme->text, .fontSize = DS_FS_LG });
+                }
+            } else {
+                category_tab_bar();
+            }
 
             /* Scrollable card grid with padding */
             CLAY(CLAY_SIDI(CLAY_STRING("GridWrap"), ID_ROOT + 3), {

@@ -109,6 +109,7 @@ typedef struct {
     size_t               search_count;
     LinyapsPackageInfo **installed_list;
     size_t               installed_count;
+    bool                 loading_remote;
 
     /* updates */
     StoreUpdateItem *update_list;
