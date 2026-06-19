@@ -9,7 +9,7 @@ void store_state_init(StoreState *s, LinyapsContext *ctx)
 {
     memset(s, 0, sizeof(*s));
     s->ctx        = ctx;
-    s->active_nav = NAV_ALL;
+    s->active_nav = NAV_RECOMMENDED;
     s->active_cat = CAT_ALL;
     s->dark_mode  = true;
     s->dirty      = true;

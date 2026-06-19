@@ -78,6 +78,15 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
     long   *out_total);
 
 /**
+ * linyaps_remote_fetch_welcome_apps — 拉取推荐应用列表
+ */
+LinyapsRemoteAppInfo **linyaps_remote_fetch_welcome_apps(
+    int page,
+    int page_size,
+    size_t *out_count,
+    long   *out_total);
+
+/**
  * linyaps_remote_fetch_ranking — 拉取排行列表
  */
 LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(

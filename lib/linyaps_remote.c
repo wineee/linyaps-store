@@ -266,6 +266,105 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
     return list;
 }
 
+LinyapsRemoteAppInfo **linyaps_remote_fetch_welcome_apps(
+    int page,
+    int page_size,
+    size_t *out_count,
+    long   *out_total)
+{
+    if (out_count) *out_count = 0;
+    if (out_total) *out_total = 0;
+
+    /* Build JSON request body */
+    cJSON *req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "repoName", LINYAPS_REMOTE_REPO_NAME);
+    cJSON_AddNumberToObject(req, "pageNo",   page);
+    cJSON_AddNumberToObject(req, "pageSize", page_size > 0 ? page_size : LINYAPS_REMOTE_PAGE_SIZE);
+    /* arch: detect from uname -m, default x86_64 */
+    {
+        const char *arch = "x86_64";
+        FILE *fp = popen("uname -m 2>/dev/null", "r");
+        char arch_buf[32] = "x86_64";
+        if (fp) { fgets(arch_buf, sizeof(arch_buf), fp); pclose(fp); }
+        size_t al = strlen(arch_buf);
+        while (al > 0 && (arch_buf[al-1] == '\n' || arch_buf[al-1] == '\r')) arch_buf[--al] = '\0';
+        if (al > 0) arch = arch_buf;
+        cJSON_AddStringToObject(req, "arch", arch);
+    }
+
+    char *body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!body) return NULL;
+
+    char url[256];
+    snprintf(url, sizeof(url), "%s/visit/getWelcomeAppList", LINYAPS_REMOTE_BASE_URL);
+
+    LOG_DEBUG("remote", "POST %s body=%s", url, body);
+
+    char *resp_raw = http_post_json(url, body);
+    free(body);
+
+    if (!resp_raw) {
+        LOG_ERR("remote", "HTTP request failed");
+        return NULL;
+    }
+
+    cJSON *root = cJSON_Parse(resp_raw);
+    free(resp_raw);
+
+    if (!root) {
+        LOG_ERR("remote", "JSON parse error");
+        return NULL;
+    }
+
+    /* Check code == 200 */
+    const cJSON *code_item = cJSON_GetObjectItemCaseSensitive(root, "code");
+    if (!cJSON_IsNumber(code_item) || (int)code_item->valuedouble != 200) {
+        const cJSON *msg = cJSON_GetObjectItemCaseSensitive(root, "message");
+        LOG_ERR("remote", "API error: %s",
+                cJSON_IsString(msg) ? msg->valuestring : "(no message)");
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    const cJSON *data    = cJSON_GetObjectItemCaseSensitive(root, "data");
+    const cJSON *records = cJSON_GetObjectItemCaseSensitive(data, "records");
+    const cJSON *total_j = cJSON_GetObjectItemCaseSensitive(data, "total");
+
+    if (!cJSON_IsArray(records)) {
+        LOG_WARN("remote", "no records array in response");
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    long total = cJSON_IsNumber(total_j) ? (long)total_j->valuedouble : 0;
+    if (out_total) *out_total = total;
+
+    int n = cJSON_GetArraySize(records);
+    LOG_INFO("remote", "fetched page=%d records=%d total=%ld", page, n, total);
+
+    LinyapsRemoteAppInfo **list = NULL;
+    size_t count = 0, cap = 0;
+
+    const cJSON *obj = NULL;
+    cJSON_ArrayForEach(obj, records) {
+        LinyapsRemoteAppInfo *info = parse_record(obj);
+        if (!info) continue;
+
+        if (count >= cap) {
+            cap = cap == 0 ? 32 : cap * 2;
+            LinyapsRemoteAppInfo **tmp = realloc(list, cap * sizeof(*list));
+            if (!tmp) { linyaps_remote_app_info_free(info); break; }
+            list = tmp;
+        }
+        list[count++] = info;
+    }
+
+    cJSON_Delete(root);
+    if (out_count) *out_count = count;
+    return list;
+}
+
 /* ------------------------------------------------------------------ */
 /* 公开：内存管理                                                        */
 /* ------------------------------------------------------------------ */

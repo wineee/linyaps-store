@@ -192,11 +192,12 @@ void store_ui_trigger_update_all(void)
 static const char *get_category_id_by_nav(NavItem nav)
 {
     switch (nav) {
-        case NAV_CAT_OFFICE: return "07";
-        case NAV_CAT_SYSTEM: return "08";
-        case NAV_CAT_DEV:    return "03";
-        case NAV_CAT_GAMES:  return "06";
-        default:             return NULL;
+        case NAV_RECOMMENDED: return "__welcome__";
+        case NAV_CAT_OFFICE:  return "07";
+        case NAV_CAT_SYSTEM:  return "08";
+        case NAV_CAT_DEV:     return "03";
+        case NAV_CAT_GAMES:   return "06";
+        default:              return NULL;
     }
 }
 
@@ -217,9 +218,13 @@ static void *fetch_remote_thread(void *arg)
     size_t count = 0;
     long   total = 0;
 
-    /* Fetch first page (up to 30 apps) */
-    LinyapsRemoteAppInfo **remote = linyaps_remote_fetch_apps(
-        "", category_id, 1, 30, &count, &total);
+    LinyapsRemoteAppInfo **remote = NULL;
+    if (category_id && strcmp(category_id, "__welcome__") == 0) {
+        remote = linyaps_remote_fetch_welcome_apps(1, 30, &count, &total);
+    } else {
+        remote = linyaps_remote_fetch_apps(
+            "", category_id, 1, 30, &count, &total);
+    }
 
     /* Convert to LinyapsPackageInfo** so we can reuse existing display code */
     LinyapsPackageInfo **list = NULL;
@@ -355,7 +360,7 @@ void store_ui_trigger_change_nav(NavItem item)
         start_remote_fetch(NULL);
     } else if (item == NAV_RECOMMENDED) {
         g_store->active_cat = CAT_ALL;
-        start_remote_fetch(NULL);
+        start_remote_fetch("__welcome__");
     }
 }
 
@@ -522,7 +527,7 @@ int main(int argc, char *argv[])
 
     /* Kick off background remote fetch to populate the full app list */
     LOG_INFO("main", "启动远端应用列表拉取...");
-    start_remote_fetch(NULL);
+    start_remote_fetch("__welcome__");
 
     /* ---- Event loop ---- */
     bool running        = true;
