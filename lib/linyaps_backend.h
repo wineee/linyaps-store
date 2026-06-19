@@ -46,6 +46,7 @@ void linyaps_uninstall(LinyapsContext *ctx,
 
 void linyaps_update(LinyapsContext *ctx,
                     const char *app_id,
+                    const char *channel,
                     LinyapsProgressCallback cb,
                     void *userdata);
 

@@ -222,83 +222,72 @@ void linyaps_uninstall(LinyapsContext *ctx,
 }
 
 /* ------------------------------------------------------------------ */
-/* Update (via ll-cli upgrade, matching Flutter store behavior)        */
+/* Update (D-Bus with packages array + appOnly + depsOnly + channel)  */
 /* ------------------------------------------------------------------ */
-
-#include <stdio.h>
 
 void linyaps_update(LinyapsContext *ctx,
                     const char *app_id,
+                    const char *channel,
                     LinyapsProgressCallback cb,
                     void *userdata)
 {
-    LOG_INFO("cli", "Update: id=%s", app_id ? app_id : "(null)");
-    if (!app_id || !*app_id) {
+    LOG_INFO("dbus", "Update: id=%s ch=%s",
+             app_id ? app_id : "(null)",
+             channel ? channel : "-");
+    if (!ctx || !ctx->bus || !app_id || !*app_id) {
         notify_failed(cb, userdata, "invalid package request", -EINVAL);
         return;
     }
-    (void)ctx; /* Not using D-Bus for update; use ll-cli instead */
-
-    /* Build command: ll-cli upgrade <app_id> --json */
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "ll-cli upgrade %s --json 2>&1", app_id);
-    LOG_INFO("cli", "执行升级命令: %s", cmd);
-
-    FILE *fp = popen(cmd, "r");
-    if (!fp) {
-        LOG_ERR("cli", "popen 失败: %s", strerror(errno));
-        notify_failed(cb, userdata, "failed to start upgrade process", -errno);
-        return;
+    pending_push(ctx, cb, userdata);
+    sd_bus_message *m = NULL;
+    sd_bus_message *reply = NULL;
+    sd_bus_error err = SD_BUS_ERROR_NULL;
+    int r = sd_bus_message_new_method_call(ctx->bus, &m, PM_DEST, PM_PATH, PM_IFACE, "Update");
+    if (r >= 0) r = sd_bus_message_open_container(m, 'a', "{sv}");
+    /* packages: variant containing av (array of variants, each wrapping a{sv}) */
+    if (r >= 0) {
+        r = sd_bus_message_open_container(m, 'e', "sv");
+        if (r >= 0) r = sd_bus_message_append_basic(m, 's', "packages");
+        if (r >= 0) r = sd_bus_message_open_container(m, 'v', "av");
+        if (r >= 0) r = sd_bus_message_open_container(m, 'a', "v");
+        if (r >= 0) r = sd_bus_message_open_container(m, 'v', "a{sv}");
+        if (r >= 0) r = sd_bus_message_open_container(m, 'a', "{sv}");
+        if (r >= 0) r = append_sv_string(m, "id", app_id);
+        if (channel && *channel)
+            if (r >= 0) r = append_sv_string(m, "channel", channel);
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close a{sv} */
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close v(a{sv}) */
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close a(v) */
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close v(av) */
+        if (r >= 0) r = sd_bus_message_close_container(m);  /* close dict entry */
     }
-
-    /* Read output line by line, parse progress */
-    char line[1024];
-    int final_code = -1;
-    while (fgets(line, sizeof(line), fp)) {
-        /* Strip trailing newline */
-        size_t len = strlen(line);
-        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
-        LOG_DEBUG("cli", "upgrade output: %s", line);
-
-        /* Try to parse as JSON for progress/status */
-        cJSON *json = cJSON_Parse(line);
-        if (json) {
-            const cJSON *msg = cJSON_GetObjectItemCaseSensitive(json, "message");
-            const cJSON *pct = cJSON_GetObjectItemCaseSensitive(json, "percentage");
-
-            if (cJSON_IsString(msg) && msg->valuestring) {
-                /* Check for success message */
-                if (strstr(msg->valuestring, "success") || strstr(msg->valuestring, "Success")) {
-                    final_code = 0;
-                }
-                /* Report progress via callback */
-                if (cb) {
-                    LinyapsTaskProgress prog = {
-                        .state = LINYAPS_TASK_STATE_UNKNOWN,
-                        .percentage = cJSON_IsNumber(pct) ? pct->valuedouble : 0.0,
-                        .message = msg->valuestring,
-                        .error_code = 0,
-                    };
-                    if (final_code == 0) prog.state = LINYAPS_TASK_STATE_SUCCEED;
-                    cb(&prog, userdata);
-                }
-            }
-            cJSON_Delete(json);
-        }
-    }
-
-    int status = pclose(fp);
-    if (final_code != 0 && status != 0) {
-        LOG_ERR("cli", "升级命令退出码: %d", status);
-        if (final_code != 0) final_code = status;
-    }
-
-    if (final_code == 0) {
-        LOG_INFO("cli", "升级成功: %s", app_id);
+    /* appOnly: false */
+    if (r >= 0) r = append_sv_bool(m, "appOnly", 0);
+    /* depsOnly: false */
+    if (r >= 0) r = append_sv_bool(m, "depsOnly", 0);
+    if (r >= 0) r = sd_bus_message_close_container(m);  /* close a{sv} */
+    if (r >= 0) r = sd_bus_call(ctx->bus, m, CALL_TIMEOUT_USEC, &err, &reply);
+    if (r < 0) {
+        LOG_ERR("dbus", "Update 调用失败: %s", err.message ? err.message : strerror(-r));
+        pending_pop_tail(ctx);
+        notify_failed(cb, userdata, err.message ? err.message : strerror(-r), r);
     } else {
-        LOG_ERR("cli", "升级失败: %s (code=%d)", app_id, final_code);
-        notify_failed(cb, userdata, "upgrade command failed", final_code);
+        int64_t code = 0;
+        char *message = NULL;
+        int pr = parse_common_result(reply, &code, &message);
+        if (pr < 0 || code != 0) {
+            LOG_ERR("dbus", "Update 返回错误: code=%lld msg=%s",
+                    (long long)code, message ? message : "");
+            pending_pop_tail(ctx);
+            notify_failed(cb, userdata, pr < 0 ? strerror(-pr) : message, pr < 0 ? pr : (int)code);
+        } else {
+            LOG_DEBUG("dbus", "Update 调用成功，等待任务信号");
+        }
+        free(message);
     }
+    sd_bus_error_free(&err);
+    sd_bus_message_unref(m);
+    sd_bus_message_unref(reply);
 }
 
 /* ------------------------------------------------------------------ */

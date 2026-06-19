@@ -237,7 +237,7 @@ int main(void)
                               &state);
         } else if (strcmp(argv[0], "update") == 0 && argc >= 2) {
             state.active = 1;
-            linyaps_update(ctx, argv[1], progress_cb, &state);
+            linyaps_update(ctx, argv[1], NULL, progress_cb, &state);
         } else if (strcmp(argv[0], "prune") == 0) {
             linyaps_prune(ctx, completion_cb, NULL);
         } else if (strcmp(argv[0], "cancel") == 0) {

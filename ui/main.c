@@ -439,7 +439,9 @@ void store_ui_trigger_update_item(StoreUpdateItem *item)
         for (size_t i = 0; i < g_store->installed_count; i++) {
             if (g_store->installed_list[i] && g_store->installed_list[i]->id &&
                 strcmp(g_store->installed_list[i]->id, item->id) == 0) {
-                linyaps_update(g_store->ctx, item->id, on_update_progress, item);
+                linyaps_update(g_store->ctx, item->id,
+                               g_store->installed_list[i]->channel,
+                               on_update_progress, item);
                 dispatched = true;
                 break;
             }
