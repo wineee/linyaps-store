@@ -269,6 +269,7 @@ int main(int argc, char *argv[])
 
         if (store.dirty) {
             UI_SetPointerState(mouse_down, mouse_released, mx, my);
+            store_ui_handle_pre_layout_actions(&store, mouse_released);
 
             Clay_BeginLayout();
             store_ui_build(&store);

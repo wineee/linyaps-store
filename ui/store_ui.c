@@ -85,6 +85,8 @@ static void launch_app(const char *app_id)
 #define ID_SEARCH         1005000
 #define ID_STATUS         1006000
 
+#define ID_THEME_TOGGLE   (ID_TITLEBAR + 11)
+
 #define SIDEBAR_W         160
 #define CARD_H            72
 #define ICON_PLACEHOLDER  48
@@ -496,13 +498,9 @@ static void titlebar(void)
         UI_SPACER(ID_TITLEBAR + 10);
 
         /* Theme toggle */
-        if (UI_IconButton(ID_TITLEBAR + 11,
-                          g_state->dark_mode ? "\xe2\x98\x80" /* ☀ */ : "\xe2\x98\xbd" /* ☽ */,
-                          DS_FS_LG, UI_BTN_GHOST, false)) {
-            g_state->dark_mode = !g_state->dark_mode;
-            DS_SetTheme(g_state->dark_mode ? &DS_THEME_DARK : &DS_THEME_LIGHT);
-            g_state->dirty = true;
-        }
+        UI_IconButton(ID_THEME_TOGGLE,
+                      g_state->dark_mode ? "\xe2\x98\x80" /* ☀ */ : "\xe2\x98\xbd" /* ☽ */,
+                      DS_FS_LG, UI_BTN_GHOST, false);
     }
 }
 
@@ -563,5 +561,19 @@ void store_ui_build(StoreState *state)
             sidebar();
             content_area();
         }
+    }
+}
+
+void store_ui_handle_pre_layout_actions(StoreState *state, bool mouse_released)
+{
+    if (!state || !mouse_released) return;
+
+    Clay_ElementId theme_id = Clay_GetElementIdWithIndex(
+        CLAY_STRING("UIIconBtn"), ID_THEME_TOGGLE);
+
+    if (Clay_PointerOver(theme_id)) {
+        state->dark_mode = !state->dark_mode;
+        DS_SetTheme(state->dark_mode ? &DS_THEME_DARK : &DS_THEME_LIGHT);
+        state->dirty = true;
     }
 }
