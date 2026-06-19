@@ -169,16 +169,74 @@ void view_ranking(void)
 
         /* Content */
         if (SDL_GetAtomicInt(&g_state->loading_ranking)) {
-            CLAY(CLAY_SIDI(CLAY_STRING("RankingLoading"), ID_STATUS + 510), {
+            /* Skeleton cards while loading */
+            AppGridSpec spec = app_grid_spec(44 + GRID_PAGE_H);
+            CLAY(CLAY_SIDI(CLAY_STRING("RankingSkeleton"), ID_STATUS + 510), {
                 .layout = {
-                    .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(200) },
-                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                    .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                    .childGap = DS_SPACE_3,
-                }
+                    .childGap        = DS_SPACE_3,
+                },
             }) {
-                TY_Text(ID_STATUS + 511, ICON_SPINNER, TY_DISPLAY);
-                TY_TextColored(ID_STATUS + 512, "正在加载排行榜...", TY_BODY, ds_theme->muted);
+                for (int row = 0; row < spec.rows; row++) {
+                    UI_ROW(ID_STATUS + 520 + row * 2, DS_SPACE_3) {
+                        for (int col = 0; col < spec.cols; col++) {
+                            int uid = ID_STATUS + 600 + row * 20 + col * 2;
+                            Clay_Color bar = ds_theme->surface1;
+                            Clay_Color bar2 = ds_theme->surface0;
+                            CLAY(CLAY_SIDI(CLAY_STRING("RSkel"), uid), {
+                                .layout = {
+                                    .sizing          = { CLAY_SIZING_FIXED((float)spec.card_w), CLAY_SIZING_FIXED(CARD_H) },
+                                    .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                                    .padding         = { DS_SPACE_3, DS_SPACE_3, DS_SPACE_3, DS_SPACE_3 },
+                                    .childGap        = DS_SPACE_3,
+                                    .childAlignment  = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+                                },
+                                .backgroundColor = ds_theme->surface0,
+                                .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_LG),
+                            }) {
+                                /* Rank badge skeleton */
+                                CLAY(CLAY_SIDI(CLAY_STRING("RSkelRank"), uid + 1), {
+                                    .layout = { .sizing = { CLAY_SIZING_FIXED(32), CLAY_SIZING_FIXED(32) } },
+                                    .backgroundColor = bar2,
+                                    .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_MD),
+                                }) {}
+                                /* Icon skeleton */
+                                CLAY(CLAY_SIDI(CLAY_STRING("RSkelIcon"), uid + 2), {
+                                    .layout = { .sizing = { CLAY_SIZING_FIXED((float)ICON_PLACEHOLDER),
+                                                            CLAY_SIZING_FIXED((float)ICON_PLACEHOLDER) } },
+                                    .backgroundColor = bar,
+                                    .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_MD),
+                                }) {}
+                                /* Text skeleton */
+                                CLAY(CLAY_SIDI(CLAY_STRING("RSkelText"), uid + 3), {
+                                    .layout = {
+                                        .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
+                                        .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                                        .childGap        = 8,
+                                    },
+                                }) {
+                                    CLAY(CLAY_SIDI(CLAY_STRING("RSkelTitle"), uid + 4), {
+                                        .layout = { .sizing = { CLAY_SIZING_PERCENT(0.5f), CLAY_SIZING_FIXED(14) } },
+                                        .backgroundColor = bar,
+                                        .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_SM),
+                                    }) {}
+                                    CLAY(CLAY_SIDI(CLAY_STRING("RSkelDesc"), uid + 5), {
+                                        .layout = { .sizing = { CLAY_SIZING_PERCENT(0.8f), CLAY_SIZING_FIXED(10) } },
+                                        .backgroundColor = bar2,
+                                        .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_SM),
+                                    }) {}
+                                }
+                                /* Button skeleton */
+                                CLAY(CLAY_SIDI(CLAY_STRING("RSkelBtn"), uid + 6), {
+                                    .layout = { .sizing = { CLAY_SIZING_FIXED(56), CLAY_SIZING_FIXED(28) } },
+                                    .backgroundColor = bar,
+                                    .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_MD),
+                                }) {}
+                            }
+                        }
+                    }
+                }
             }
         } else if (!g_state->ranking_list || g_state->ranking_count == 0) {
             CLAY(CLAY_SIDI(CLAY_STRING("RankingEmpty"), ID_STATUS + 510), {

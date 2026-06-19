@@ -109,6 +109,7 @@ typedef struct {
     /* package data */
     LinyapsPackageInfo **search_results;
     size_t               search_count;
+    long                 remote_total;    /* total count reported by API */
     LinyapsPackageInfo **installed_list;
     size_t               installed_count;
     SDL_AtomicInt        loading_remote;  /* 0 = idle, 1 = loading */

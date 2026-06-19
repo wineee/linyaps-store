@@ -27,6 +27,7 @@ typedef struct {
     LinyapsPackageInfo **list;
     size_t               count;
     long                 total;
+    int                  page;
 } RemoteResult;
 
 static StoreState *g_store = NULL;
@@ -82,17 +83,27 @@ static const char *get_category_id_by_tab(CategoryTab tab)
 /* Remote app list fetch thread                                        */
 /* ------------------------------------------------------------------ */
 
+/* Argument for fetch_remote_thread: owns category_id string */
+typedef struct {
+    char *category_id;
+    int   page;
+} RemoteFetchArg;
+
 static void *fetch_remote_thread(void *arg)
 {
-    char *category_id = arg;
+    RemoteFetchArg *farg = arg;
+    char *category_id = farg->category_id;
+    int   page = farg->page;
+    free(farg);
+
     size_t count = 0;
     long   total = 0;
 
     LinyapsRemoteAppInfo **remote = NULL;
     if (category_id && strcmp(category_id, "__welcome__") == 0) {
-        remote = linyaps_remote_fetch_welcome_apps(1, 30, &count, &total);
+        remote = linyaps_remote_fetch_welcome_apps(page, 30, &count, &total);
     } else {
-        remote = linyaps_remote_fetch_apps("", category_id, 1, 30, &count, &total);
+        remote = linyaps_remote_fetch_apps("", category_id, page, 30, &count, &total);
     }
 
     LinyapsPackageInfo **list = NULL;
@@ -105,12 +116,12 @@ static void *fetch_remote_thread(void *arg)
         linyaps_remote_app_info_list_free(remote, count);
     }
 
-    LOG_INFO("remote", "远端拉取完成: category=%s count=%zu total=%ld",
-             category_id ? category_id : "NULL", count, total);
+    LOG_INFO("remote", "远端拉取完成: category=%s page=%d count=%zu total=%ld",
+             category_id ? category_id : "NULL", page, count, total);
 
     RemoteResult *res = malloc(sizeof(*res));
     if (res) {
-        res->list = list; res->count = count; res->total = total;
+        res->list = list; res->count = count; res->total = total; res->page = page;
         post_user_event(EVT_REMOTE_READY, res, category_id);
     } else {
         linyaps_package_info_list_free(list, count);
@@ -119,20 +130,27 @@ static void *fetch_remote_thread(void *arg)
     return NULL;
 }
 
-static void start_remote_fetch(const char *category_id)
+static void start_remote_fetch(const char *category_id, int page)
 {
     SDL_SetAtomicInt(&g_store->loading_remote, 1);
     SDL_SetAtomicInt(&g_store->dirty, 1);
 
-    char *cat_copy = category_id ? strdup(category_id) : NULL;
+    RemoteFetchArg *farg = malloc(sizeof(*farg));
+    if (!farg) {
+        SDL_SetAtomicInt(&g_store->loading_remote, 0);
+        return;
+    }
+    farg->category_id = category_id ? strdup(category_id) : NULL;
+    farg->page = page;
 
     pthread_t tid;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    if (pthread_create(&tid, &attr, fetch_remote_thread, cat_copy) != 0) {
+    if (pthread_create(&tid, &attr, fetch_remote_thread, farg) != 0) {
         LOG_WARN("remote", "无法创建后台远端拉取线程");
-        free(cat_copy);
+        free(farg->category_id);
+        free(farg);
         SDL_SetAtomicInt(&g_store->loading_remote, 0);
     }
     pthread_attr_destroy(&attr);
@@ -349,18 +367,19 @@ void store_ui_trigger_change_nav(NavItem item)
     if (g_store->active_nav == item) return;
     g_store->active_nav = item;
     g_store->current_page = 0;
+    g_store->remote_total = 0;
     SDL_SetAtomicInt(&g_store->dirty, 1);
 
     if (item == NAV_RANKING) {
         start_ranking_fetch(g_store->ranking_tab, g_store->current_page + 1);
     } else if (item >= NAV_CAT_OFFICE && item <= NAV_CAT_GAMES) {
-        start_remote_fetch(get_category_id_by_nav(item));
+        start_remote_fetch(get_category_id_by_nav(item), 1);
     } else if (item == NAV_ALL) {
         g_store->active_cat = CAT_ALL;
-        start_remote_fetch(NULL);
+        start_remote_fetch(NULL, 1);
     } else if (item == NAV_RECOMMENDED) {
         g_store->active_cat = CAT_ALL;
-        start_remote_fetch("__welcome__");
+        start_remote_fetch("__welcome__", 1);
     }
 }
 
@@ -369,8 +388,9 @@ void store_ui_trigger_change_category_tab(CategoryTab tab)
     if (g_store->active_cat == tab) return;
     g_store->active_cat = tab;
     g_store->current_page = 0;
+    g_store->remote_total = 0;
     SDL_SetAtomicInt(&g_store->dirty, 1);
-    start_remote_fetch(get_category_id_by_tab(tab));
+    start_remote_fetch(get_category_id_by_tab(tab), 1);
 }
 
 void store_ui_trigger_change_ranking_tab(int tab_idx)
@@ -401,6 +421,23 @@ void store_ui_trigger_change_ranking_page(int page_idx)
         g_store->ranking_count = 0;
     }
     start_ranking_fetch(g_store->ranking_tab, page_idx + 1);
+}
+
+/* Helper: get current remote category_id based on active navigation */
+static const char *current_remote_category(void)
+{
+    if (g_store->active_nav == NAV_RECOMMENDED)      return "__welcome__";
+    if (g_store->active_nav == NAV_ALL)              return get_category_id_by_tab(g_store->active_cat);
+    if (g_store->active_nav >= NAV_CAT_OFFICE &&
+        g_store->active_nav <= NAV_CAT_GAMES)        return get_category_id_by_nav(g_store->active_nav);
+    return NULL;
+}
+
+void store_ui_trigger_remote_page(int page_idx)
+{
+    if (page_idx < 0) return;
+    g_store->current_page = page_idx;
+    start_remote_fetch(current_remote_category(), page_idx + 1);
 }
 
 /* ================================================================== */
@@ -494,22 +531,19 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
         RemoteResult *res = e->user.data1;
         char *category_id = e->user.data2;
         if (res) {
-            const char *current_cat = NULL;
-            if (store->active_nav == NAV_RECOMMENDED)
-                current_cat = "__welcome__";
-            else if (store->active_nav >= NAV_CAT_OFFICE && store->active_nav <= NAV_CAT_GAMES)
-                current_cat = get_category_id_by_nav(store->active_nav);
-            else if (store->active_nav == NAV_ALL)
-                current_cat = get_category_id_by_tab(store->active_cat);
-
+            const char *current_cat = current_remote_category();
             bool matches = (!category_id && !current_cat) ||
                            (category_id && current_cat && strcmp(category_id, current_cat) == 0);
+            /* Also check that the page matches what we expect */
+            if (matches && store->current_page != res->page - 1)
+                matches = false;
+
             if (matches) {
                 if (store->search_results != store->installed_list)
                     linyaps_package_info_list_free(store->search_results, store->search_count);
                 store->search_results = res->list;
                 store->search_count   = res->count;
-                store->current_page   = 0;
+                store->remote_total   = res->total;
                 SDL_SetAtomicInt(&store->loading_remote, 0);
                 SDL_SetAtomicInt(&store->dirty, 1);
             } else {
@@ -702,7 +736,7 @@ int main(int argc, char *argv[])
     }
 
     LOG_INFO("main", "启动远端应用列表拉取...");
-    start_remote_fetch("__welcome__");
+    start_remote_fetch("__welcome__", 1);
 
     /* ---- Event loop ---- */
     InputState input = { false, false, 0, 0 };
