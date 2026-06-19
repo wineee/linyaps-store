@@ -199,7 +199,7 @@ void view_app_grid(void)
     size_t end_idx = count;
 
     UI_COL(ID_STATUS + 9, DS_SPACE_3) {
-        UI_COL(ID_STATUS + 10, DS_SPACE_3) {
+        UI_SCROLLCOL(ID_STATUS + 10, DS_SPACE_3) {
             size_t i = start_idx;
             int row_idx = 0;
             while (i < end_idx) {
