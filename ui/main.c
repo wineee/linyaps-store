@@ -104,6 +104,7 @@ static void on_search_results(LinyapsPackageInfo **items,
     if (error_code == 0 && items) {
         s->search_results = items;
         s->search_count   = count;
+        s->current_page   = 0;
     } else {
         s->search_results = NULL;
         s->search_count   = 0;
@@ -234,6 +235,7 @@ int main(int argc, char *argv[])
                         linyaps_package_info_list_free(store.search_results, store.search_count);
                     store.search_results = res->list;
                     store.search_count   = res->count;
+                    store.current_page   = 0;
                     store.dirty = true;
                     free(res);
                 }

@@ -102,6 +102,9 @@ typedef struct {
     /* theme */
     bool dark_mode;
 
+    /* pagination */
+    int current_page;
+
     /* dirty flag driven rendering */
     bool dirty;
 } StoreState;

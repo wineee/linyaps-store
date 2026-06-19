@@ -123,6 +123,7 @@ static void sidebar_nav_item(int uid, NavItem item, const char *label,
 
     if (hov && UI__mouse_released) {
         g_state->active_nav = item;
+        g_state->current_page = 0;
         g_state->dirty      = true;
     }
 
@@ -224,6 +225,7 @@ static void category_tab_bar(void)
 
             if (hov && UI__mouse_released) {
                 g_state->active_cat = (CategoryTab)i;
+                g_state->current_page = 0;
                 g_state->dirty      = true;
             }
 
@@ -354,36 +356,81 @@ static void app_grid(void)
         return;
     }
 
-    /* Outer scroll container */
-    UI_SCROLLCOL(ID_STATUS + 10, DS_SPACE_3) {
-        /* Rows of 3 cards each */
-        size_t i = 0;
-        int row_idx = 0;
-        while (i < count) {
-            UI_ROW(ID_STATUS + 20 + row_idx * 2, DS_SPACE_3) {
-                for (int col = 0; col < 3 && i < count; col++, i++) {
-                    bool inst = false;
-                    /* Check installed list */
-                    for (size_t k = 0; k < g_state->installed_count; k++) {
-                        LinyapsPackageInfo *ins = g_state->installed_list[k];
-                        if (ins && ins->id && list[i]->id &&
-                            strcmp(ins->id, list[i]->id) == 0) {
-                            inst = true;
-                            break;
+    int items_per_page = 12; // 3 columns * 4 rows
+    int total_pages = (count + items_per_page - 1) / items_per_page;
+    if (g_state->current_page >= total_pages) g_state->current_page = total_pages - 1;
+    if (g_state->current_page < 0) g_state->current_page = 0;
+
+    size_t start_idx = g_state->current_page * items_per_page;
+    size_t end_idx = start_idx + items_per_page;
+    if (end_idx > count) end_idx = count;
+
+    /* Outer column for grid + pagination */
+    UI_COL(ID_STATUS + 9, DS_SPACE_3) {
+        /* App Grid */
+        UI_COL(ID_STATUS + 10, DS_SPACE_3) {
+            /* Rows of 3 cards each */
+            size_t i = start_idx;
+            int row_idx = 0;
+            while (i < end_idx) {
+                UI_ROW(ID_STATUS + 20 + row_idx * 2, DS_SPACE_3) {
+                    for (int col = 0; col < 3 && i < end_idx; col++, i++) {
+                        bool inst = false;
+                        /* Check installed list */
+                        for (size_t k = 0; k < g_state->installed_count; k++) {
+                            LinyapsPackageInfo *ins = g_state->installed_list[k];
+                            if (ins && ins->id && list[i]->id &&
+                                strcmp(ins->id, list[i]->id) == 0) {
+                                inst = true;
+                                break;
+                            }
                         }
+                        app_card((int)i, list[i], inst);
                     }
-                    app_card((int)i, list[i], inst);
+                    /* Fill empty columns in last row */
+                    for (int col = (int)((end_idx - start_idx) - (i - start_idx - ((end_idx - start_idx) % 3 == 0 ? 3 : (end_idx - start_idx) % 3)));
+                         (end_idx - start_idx) % 3 != 0 && col < 3 && row_idx == (int)((end_idx - start_idx - 1) / 3); col++) {
+                        /* invisible filler */
+                        CLAY(CLAY_SIDI(CLAY_STRING("CardFill"), ID_STATUS + 50 + col), {
+                            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CARD_H) } },
+                        }) {}
+                    }
                 }
-                /* Fill empty columns in last row */
-                for (int col = (int)(count - (i - (count % 3 == 0 ? 3 : count % 3)));
-                     count % 3 != 0 && col < 3 && row_idx == (int)((count - 1) / 3); col++) {
-                    /* invisible filler */
-                    CLAY(CLAY_SIDI(CLAY_STRING("CardFill"), ID_STATUS + 50 + col), {
-                        .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CARD_H) } },
-                    }) {}
-                }
+                row_idx++;
             }
-            row_idx++;
+        }
+        
+        UI_SPACER(ID_STATUS + 80);
+        
+        /* Pagination Controls */
+        if (total_pages > 1) {
+            UI_ROW(ID_STATUS + 81, DS_SPACE_3) {
+                UI_SPACER(ID_STATUS + 82);
+                
+                if (UI_Button(ID_STATUS + 83, "上一页", g_state->current_page > 0 ? UI_BTN_SECONDARY : UI_BTN_GHOST, UI_BTN_SM, false)) {
+                    if (g_state->current_page > 0) {
+                        g_state->current_page--;
+                        g_state->dirty = true;
+                    }
+                }
+                
+                static char page_text[32];
+                snprintf(page_text, sizeof(page_text), "第 %d / %d 页", g_state->current_page + 1, total_pages);
+                CLAY(CLAY_SIDI(CLAY_STRING("PageText"), ID_STATUS + 84), {
+                    .layout = { .sizing = { CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0) }, .padding = { 8, 8, 0, 0 } },
+                }) {
+                    CLAY_TEXT(UI__str(page_text), { .textColor = ds_theme->text, .fontSize = DS_FS_SM });
+                }
+                
+                if (UI_Button(ID_STATUS + 85, "下一页", g_state->current_page < total_pages - 1 ? UI_BTN_SECONDARY : UI_BTN_GHOST, UI_BTN_SM, false)) {
+                    if (g_state->current_page < total_pages - 1) {
+                        g_state->current_page++;
+                        g_state->dirty = true;
+                    }
+                }
+                
+                UI_SPACER(ID_STATUS + 86);
+            }
         }
     }
 }
