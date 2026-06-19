@@ -27,8 +27,34 @@
 #include <sys/wait.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 
 extern char **environ;
+
+static char g_string_arena[16384];
+static size_t g_string_arena_offset = 0;
+
+static const char *store_ui_frame_str(const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    char *dest = &g_string_arena[g_string_arena_offset];
+    int remaining = (int)(sizeof(g_string_arena) - g_string_arena_offset);
+    if (remaining <= 0) {
+        va_end(args);
+        return "";
+    }
+    int n = vsnprintf(dest, remaining, fmt, args);
+    va_end(args);
+    if (n < 0) return "";
+    g_string_arena_offset += n + 1; // include null terminator
+    return dest;
+}
+
+static void store_ui_reset_frame_str_arena(void)
+{
+    g_string_arena_offset = 0;
+}
 
 /* ================================================================
  * App launch helper
@@ -157,8 +183,7 @@ static void sidebar_nav_item(int uid, NavItem item, const char *label,
                 .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1) } }
             }) {}
 
-            char count_str[16];
-            snprintf(count_str, sizeof(count_str), "%zu", g_state->update_count);
+            const char *count_str = store_ui_frame_str("%zu", g_state->update_count);
             UI_Badge(uid + 200, count_str, DS_VARIANT_ERROR);
         }
     }
@@ -438,8 +463,7 @@ static void app_grid(void)
                     }
                 }
                 
-                static char page_text[32];
-                snprintf(page_text, sizeof(page_text), "第 %d / %d 页", g_state->current_page + 1, total_pages);
+                const char *page_text = store_ui_frame_str("第 %d / %d 页", g_state->current_page + 1, total_pages);
                 CLAY(CLAY_SIDI(CLAY_STRING("PageText"), ID_STATUS + 84), {
                     .layout = { .sizing = { CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0) }, .padding = { 8, 8, 0, 0 } },
                 }) {
@@ -559,13 +583,13 @@ static void updates_view(void)
             /* Header row */
             UI_ROW(ID_STATUS + 101, DS_SPACE_3) {
                 /* Left title text */
-                char header_text[64];
+                const char *header_text = "";
                 if (g_state->checking_updates) {
-                    snprintf(header_text, sizeof(header_text), "正在检查可更新的应用...");
+                    header_text = "正在检查可更新的应用...";
                 } else if (g_state->update_count > 0) {
-                    snprintf(header_text, sizeof(header_text), "共 %zu 个应用可更新", g_state->update_count);
+                    header_text = store_ui_frame_str("共 %zu 个应用可更新", g_state->update_count);
                 } else {
-                    snprintf(header_text, sizeof(header_text), "您的应用已是最新版本");
+                    header_text = "您的应用已是最新版本";
                 }
                 TY_Text(ID_STATUS + 102, header_text, TY_H3);
 
@@ -636,21 +660,21 @@ static void updates_view(void)
                             .backgroundColor = card_bg,
                             .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_LG),
                         }) {
-                            char letter[2] = { '?', '\0' };
+                            char letter_buf[2] = { '?', '\0' };
                             if (item->name && item->name[0]) {
-                                letter[0] = item->name[0];
+                                letter_buf[0] = item->name[0];
                                 if (item->id) {
                                     const char *last_dot = strrchr(item->id, '.');
                                     if (last_dot && last_dot[1]) {
-                                        letter[0] = last_dot[1];
+                                        letter_buf[0] = last_dot[1];
                                     }
                                 }
                             }
-                            if (letter[0] >= 'a' && letter[0] <= 'z') {
-                                letter[0] = (char)(letter[0] - 'a' + 'A');
+                            if (letter_buf[0] >= 'a' && letter_buf[0] <= 'z') {
+                                letter_buf[0] = (char)(letter_buf[0] - 'a' + 'A');
                             }
 
-                            letter_icon_placeholder(base + 1, ICON_PLACEHOLDER, letter);
+                            letter_icon_placeholder(base + 1, ICON_PLACEHOLDER, store_ui_frame_str("%s", letter_buf));
 
                             /* Text block: Name and Version transition */
                             CLAY(CLAY_SIDI(CLAY_STRING("UpdateCardText"), base + 2), {
@@ -658,17 +682,15 @@ static void updates_view(void)
                                     .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
                                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
                                     .childGap        = 4,
-                                },
+                                }
                             }) {
                                 TY_Text(base + 3, item->name ? item->name : item->id, TY_H4);
 
                                 if (item->updating) {
-                                    char prog_text[64];
-                                    snprintf(prog_text, sizeof(prog_text), "正在更新中... %.0f%%", item->progress * 100.0f);
+                                    const char *prog_text = store_ui_frame_str("正在更新中... %.0f%%", item->progress * 100.0f);
                                     UI_Progress(base + 4, prog_text, item->progress, 1.0f);
                                 } else {
-                                    char ver_text[128];
-                                    snprintf(ver_text, sizeof(ver_text), "%s  \xe2\x86\x92  %s",
+                                    const char *ver_text = store_ui_frame_str("%s  \xe2\x86\x92  %s",
                                              item->current_version ? item->current_version : "0.0.0",
                                              item->new_version ? item->new_version : "0.0.0");
                                     CLAY(CLAY_SIDI(CLAY_STRING("UpdateCardVer"), base + 5), {
@@ -788,26 +810,25 @@ static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *i
             .backgroundColor = rank_bg,
             .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_MD),
         }) {
-            char rank_str[12];
-            snprintf(rank_str, sizeof(rank_str), "%d", rank);
+            const char *rank_str = store_ui_frame_str("%d", rank);
             CLAY_TEXT(UI__str(rank_str), { .textColor = rank_fg, .fontSize = DS_FS_MD });
         }
 
         /* Icon placeholder */
-        char letter[2] = { '?', '\0' };
+        char letter_buf[2] = { '?', '\0' };
         if (info->name && info->name[0]) {
-            letter[0] = info->name[0];
+            letter_buf[0] = info->name[0];
             if (info->id) {
                 const char *last_dot = strrchr(info->id, '.');
                 if (last_dot && last_dot[1]) {
-                    letter[0] = last_dot[1];
+                    letter_buf[0] = last_dot[1];
                 }
             }
         }
-        if (letter[0] >= 'a' && letter[0] <= 'z') {
-            letter[0] = (char)(letter[0] - 'a' + 'A');
+        if (letter_buf[0] >= 'a' && letter_buf[0] <= 'z') {
+            letter_buf[0] = (char)(letter_buf[0] - 'a' + 'A');
         }
-        letter_icon_placeholder(base + 1, ICON_PLACEHOLDER, letter);
+        letter_icon_placeholder(base + 1, ICON_PLACEHOLDER, store_ui_frame_str("%s", letter_buf));
 
         /* Text block: name + description + meta */
         CLAY(CLAY_SIDI(CLAY_STRING("RankCardText"), base + 2), {
@@ -841,7 +862,8 @@ static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *i
                 } else {
                     meta_str = format_download_count(info->download_count);
                 }
-                CLAY_TEXT(UI__str(meta_str),
+                const char *meta_str_arena = store_ui_frame_str("%s", meta_str);
+                CLAY_TEXT(UI__str(meta_str_arena),
                           { .textColor = ds_theme->muted, .fontSize = DS_FS_SM });
             }
         }
@@ -1004,8 +1026,7 @@ static void ranking_view(void)
                 }
 
                 /* Page indicator text */
-                char page_str[64];
-                snprintf(page_str, sizeof(page_str), "第 %d / %ld 页", cur_p + 1, total_pages);
+                const char *page_str = store_ui_frame_str("第 %d / %ld 页", cur_p + 1, total_pages);
                 CLAY_TEXT(UI__str(page_str), { .textColor = ds_theme->text, .fontSize = DS_FS_MD });
 
                 /* Next page button */
@@ -1061,8 +1082,7 @@ static void content_area(void)
                         .width = { .bottom = 1 },
                     },
                 }) {
-                    char header_str[64];
-                    snprintf(header_str, sizeof(header_str), "%s (%zu)",
+                    const char *header_str = store_ui_frame_str("%s (%zu)",
                              NAV_LABELS[g_state->active_nav],
                              g_state->search_count);
                     CLAY_TEXT(UI__str(header_str), { .textColor = ds_theme->text, .fontSize = DS_FS_LG });
@@ -1109,6 +1129,7 @@ static void content_area(void)
 
 void store_ui_build(StoreState *state)
 {
+    store_ui_reset_frame_str_arena();
     g_state = state;
 
     CLAY(CLAY_ID("StoreRoot"), {
