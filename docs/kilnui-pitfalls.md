@@ -104,25 +104,18 @@ case CLAY_RENDER_COMMAND_TYPE_BORDER: {
 }
 ```
 
-### 注意
+### 当前状态：⚠️ 未完全解决（已有 workaround）
 
-Clay 的 `BORDER` render data（`Clay_BorderRenderData`）只包含 `color` 和 `width`，**不携带 `cornerRadius`**。
+`Clay_BorderRenderData` 不携带 `cornerRadius`，无法直接获取。
 
-**已解决**：Clay 为同一个元素总是先生成 `RECTANGLE` 命令、再生成 `BORDER` 命令，两者的 `boundingBox` 完全相同。在 pre-pass 处理 `BORDER` 时，向前检查上一条命令：若是 `RECTANGLE` 且 bounding box 一致，则借用其 `cornerRadius`：
+**尝试过但放弃的方案**：在 pre-pass 向前查找 bounding box 相同的 `RECTANGLE` 命令来借用其 `cornerRadius`。该方案在简单场景下有效，但当元素没有 `backgroundColor`（不生成 RECTANGLE）或 scissor/floating 命令在两者之间插入时会读到错误数据，不够可靠。
 
-```c
-Clay_CornerRadius cr = {0};
-if (i > 0) {
-    Clay_RenderCommand *prev = Clay_RenderCommandArray_Get(&cmds, i - 1);
-    if (prev->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE &&
-        prev->boundingBox.x == bb.x && prev->boundingBox.y == bb.y &&
-        prev->boundingBox.width == bb.width && prev->boundingBox.height == bb.height) {
-        cr = prev->renderData.rectangle.cornerRadius;
-    }
-}
-```
+**当前 workaround**：`UI_BTN_SECONDARY` 不使用 `.border` 字段，改为使用更醒目的背景色（`surface2` / `overlay0`）与其他变体区分视觉。
 
-这样边框与背景圆角完全一致。若某元素没有 `backgroundColor`（不生成 RECTANGLE），则 `cr` 退化为 `{0}`（直角），这种情况在实际 UI 中极少发生。
+**TODO**（`kilnui_render.c` 和 `kilnui/src/ui/button.c` 中均有注释）：  
+找到可靠的方式将 `cornerRadius` 传递给 BORDER 渲染命令。可能的思路：
+- 在 Clay 自定义扩展中扩展 `Clay_BorderRenderData` 结构体（需要修改 clay.h）
+- 用单独的全局哈希表按 element ID 缓存 cornerRadius，RECTANGLE 时写入、BORDER 时读取
 
 ---
 
