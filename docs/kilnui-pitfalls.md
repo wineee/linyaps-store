@@ -106,9 +106,23 @@ case CLAY_RENDER_COMMAND_TYPE_BORDER: {
 
 ### 注意
 
-Clay 的 `BORDER` render data（`Clay_BorderRenderData`）只包含 `color` 和 `width`，**不携带 cornerRadius**。用 border pipeline 渲染时 cornerRadius 传 0，意味着边框角是直角。对于按钮（radius = 4px，border = 1px），差异在视觉上几乎不可见，可接受。
+Clay 的 `BORDER` render data（`Clay_BorderRenderData`）只包含 `color` 和 `width`，**不携带 `cornerRadius`**。
 
-若需要圆角边框，须改用 CUSTOM 路径并将 cornerRadius 编码进自定义数据结构（见坑 #1，但须确保不是 floating）。
+**已解决**：Clay 为同一个元素总是先生成 `RECTANGLE` 命令、再生成 `BORDER` 命令，两者的 `boundingBox` 完全相同。在 pre-pass 处理 `BORDER` 时，向前检查上一条命令：若是 `RECTANGLE` 且 bounding box 一致，则借用其 `cornerRadius`：
+
+```c
+Clay_CornerRadius cr = {0};
+if (i > 0) {
+    Clay_RenderCommand *prev = Clay_RenderCommandArray_Get(&cmds, i - 1);
+    if (prev->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE &&
+        prev->boundingBox.x == bb.x && prev->boundingBox.y == bb.y &&
+        prev->boundingBox.width == bb.width && prev->boundingBox.height == bb.height) {
+        cr = prev->renderData.rectangle.cornerRadius;
+    }
+}
+```
+
+这样边框与背景圆角完全一致。若某元素没有 `backgroundColor`（不生成 RECTANGLE），则 `cr` 退化为 `{0}`（直角），这种情况在实际 UI 中极少发生。
 
 ---
 
