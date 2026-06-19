@@ -47,6 +47,11 @@ typedef struct LinyapsRemoteAppInfo {
     char *category_name;  /* 分类名，如 "网络应用" */
 } LinyapsRemoteAppInfo;
 
+typedef enum {
+    LINYAPS_RANKING_NEWEST = 0,
+    LINYAPS_RANKING_DOWNLOADS,
+} LinyapsRankingType;
+
 /* ------------------------------------------------------------------ */
 /* 函数                                                                 */
 /* ------------------------------------------------------------------ */
@@ -71,6 +76,16 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
     int page_size,
     size_t *out_count,
     long   *out_total);
+
+/**
+ * linyaps_remote_fetch_ranking — 拉取排行列表
+ */
+LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(
+    LinyapsRankingType type,
+    int                page,
+    int                page_size,
+    size_t            *out_count,
+    long              *out_total);
 
 /**
  * linyaps_remote_app_info_free — 释放单个 LinyapsRemoteAppInfo

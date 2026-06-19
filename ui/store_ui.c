@@ -124,9 +124,7 @@ static void sidebar_nav_item(int uid, NavItem item, const char *label,
     bool hov = Clay_PointerOver(eid);
 
     if (hov && UI__mouse_released) {
-        g_state->active_nav = item;
-        g_state->current_page = 0;
-        g_state->dirty      = true;
+        store_ui_trigger_change_nav(item);
     }
 
     Clay_Color bg = active ? ds_theme->surface1
@@ -687,6 +685,232 @@ static void updates_view(void)
     }
 }
 
+static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *info, bool installed)
+{
+    int base = ID_CARD_BASE + 20000 + card_idx * 20;
+
+    Clay_ElementId card_id = Clay_GetElementIdWithIndex(CLAY_STRING("RankCard"), card_idx);
+    bool card_hov = Clay_PointerOver(card_id);
+    Clay_Color card_bg = card_hov ? ds_theme->surface1 : ds_theme->surface0;
+
+    CLAY(card_id, {
+        .layout = {
+            .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CARD_H) },
+            .layoutDirection = CLAY_LEFT_TO_RIGHT,
+            .padding         = { DS_SPACE_3, DS_SPACE_3, DS_SPACE_3, DS_SPACE_3 },
+            .childGap        = DS_SPACE_3,
+            .childAlignment  = { CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER },
+        },
+        .backgroundColor = card_bg,
+        .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_LG),
+    }) {
+        /* Rank Badge Box */
+        Clay_Color rank_bg;
+        Clay_Color rank_fg = ds_theme->text;
+        if (rank == 1) {
+            rank_bg = (Clay_Color){ 249, 226, 175, 255 }; /* Catppuccin Peach/Yellow */
+            rank_fg = (Clay_Color){ 17, 17, 27, 255 }; /* Dark text for readability */
+        } else if (rank == 2) {
+            rank_bg = (Clay_Color){ 166, 173, 200, 255 }; /* Silver */
+            rank_fg = (Clay_Color){ 17, 17, 27, 255 };
+        } else if (rank == 3) {
+            rank_bg = (Clay_Color){ 250, 179, 135, 255 }; /* Bronze/Orange */
+            rank_fg = (Clay_Color){ 17, 17, 27, 255 };
+        } else {
+            rank_bg = ds_theme->surface1;
+            rank_fg = ds_theme->muted;
+        }
+
+        CLAY(CLAY_SIDI(CLAY_STRING("RankBadgeBox"), base), {
+            .layout = {
+                .sizing          = { CLAY_SIZING_FIXED(32), CLAY_SIZING_FIXED(32) },
+                .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+            },
+            .backgroundColor = rank_bg,
+            .cornerRadius    = CLAY_CORNER_RADIUS(DS_RADIUS_MD),
+        }) {
+            char rank_str[12];
+            snprintf(rank_str, sizeof(rank_str), "%d", rank);
+            CLAY_TEXT(UI__str(rank_str), { .textColor = rank_fg, .fontSize = DS_FS_MD });
+        }
+
+        /* Icon placeholder */
+        char letter[2] = { '?', '\0' };
+        if (info->name && info->name[0]) {
+            letter[0] = info->name[0];
+            if (info->id) {
+                const char *last_dot = strrchr(info->id, '.');
+                if (last_dot && last_dot[1]) {
+                    letter[0] = last_dot[1];
+                }
+            }
+        }
+        if (letter[0] >= 'a' && letter[0] <= 'z') {
+            letter[0] = (char)(letter[0] - 'a' + 'A');
+        }
+        letter_icon_placeholder(base + 1, ICON_PLACEHOLDER, letter);
+
+        /* Text block: name + description */
+        CLAY(CLAY_SIDI(CLAY_STRING("RankCardText"), base + 2), {
+            .layout = {
+                .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
+                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                .childGap        = 4,
+            },
+        }) {
+            TY_Text(base + 3, info->name ? info->name : info->id, TY_H4);
+            CLAY(CLAY_SIDI(CLAY_STRING("RankCardDesc"), base + 4), {
+                .layout = {
+                    .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
+                },
+                .clip = { .horizontal = true },
+            }) {
+                const char *desc = info->description ? info->description : "";
+                CLAY_TEXT(UI__str(desc),
+                          { .textColor = ds_theme->subtext, .fontSize = DS_FS_SM });
+            }
+        }
+
+        /* Spacer to push button to the right */
+        CLAY(CLAY_SIDI(CLAY_STRING("RankCardSpacer"), base + 10), {
+            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1) } }
+        }) {}
+
+        /* Action button */
+        if (installed) {
+            if (UI_Button(base + 5, "打开", UI_BTN_GHOST, UI_BTN_SM, false)) {
+                const char *app_id = info->id ? info->id : NULL;
+                LOG_INFO("ui", "打开按钮点击: id=%s", app_id ? app_id : "(unknown)");
+                launch_app(app_id);
+            }
+        } else {
+            if (UI_Button(base + 5, "安装", UI_BTN_PRIMARY, UI_BTN_SM, false)) {
+                const char *app_id = info->id ? info->id : "(unknown)";
+                LOG_INFO("ui", "安装按钮点击: id=%s ver=%s",
+                         app_id,
+                         info->version ? info->version : "-");
+                if (g_state->ctx) {
+                    linyaps_install(g_state->ctx,
+                                    info->id,
+                                    info->version,
+                                    info->channel,
+                                    NULL, NULL);
+                } else {
+                    LOG_WARN("ui", "后端未连接，无法安装 %s", app_id);
+                }
+                g_state->dirty = true;
+            }
+        }
+    }
+}
+
+static void ranking_view(void)
+{
+    /* Main vertical container */
+    UI_COL(ID_STATUS + 500, DS_SPACE_3) {
+        /* Header / Tab section */
+        UI_ROW(ID_STATUS + 501, DS_SPACE_3) {
+            /* Tab 0: 最新上架榜 */
+            bool tab0_active = (g_state->ranking_tab == 0);
+            Clay_ElementId tab0_id = Clay_GetElementIdWithIndex(CLAY_STRING("RankingTab"), 0);
+            bool tab0_hov = Clay_PointerOver(tab0_id);
+            if (tab0_hov && UI__mouse_released) {
+                store_ui_trigger_change_ranking_tab(0);
+            }
+            Clay_Color tab0_bg = tab0_active ? ds_theme->accent : tab0_hov ? ds_theme->surface1 : ds_theme->surface0;
+            Clay_Color tab0_fg = tab0_active ? ds_theme->base : ds_theme->text;
+            
+            CLAY(tab0_id, {
+                .layout = {
+                    .padding = { DS_SPACE_4, DS_SPACE_4, DS_SPACE_2, DS_SPACE_2 },
+                },
+                .backgroundColor = tab0_bg,
+                .cornerRadius = CLAY_CORNER_RADIUS(DS_RADIUS_MD),
+            }) {
+                CLAY_TEXT(CLAY_STRING("最新上架榜"), { .textColor = tab0_fg, .fontSize = DS_FS_MD });
+            }
+
+            /* Tab 1: 下载量榜 */
+            bool tab1_active = (g_state->ranking_tab == 1);
+            Clay_ElementId tab1_id = Clay_GetElementIdWithIndex(CLAY_STRING("RankingTab"), 1);
+            bool tab1_hov = Clay_PointerOver(tab1_id);
+            if (tab1_hov && UI__mouse_released) {
+                store_ui_trigger_change_ranking_tab(1);
+            }
+            Clay_Color tab1_bg = tab1_active ? ds_theme->accent : tab1_hov ? ds_theme->surface1 : ds_theme->surface0;
+            Clay_Color tab1_fg = tab1_active ? ds_theme->base : ds_theme->text;
+            
+            CLAY(tab1_id, {
+                .layout = {
+                    .padding = { DS_SPACE_4, DS_SPACE_4, DS_SPACE_2, DS_SPACE_2 },
+                },
+                .backgroundColor = tab1_bg,
+                .cornerRadius = CLAY_CORNER_RADIUS(DS_RADIUS_MD),
+            }) {
+                CLAY_TEXT(CLAY_STRING("下载量榜"), { .textColor = tab1_fg, .fontSize = DS_FS_MD });
+            }
+        }
+
+        /* Content List */
+        if (g_state->loading_ranking) {
+            CLAY(CLAY_SIDI(CLAY_STRING("RankingLoading"), ID_STATUS + 510), {
+                .layout = {
+                    .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(200) },
+                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                    .childGap = DS_SPACE_3,
+                }
+            }) {
+                TY_Text(ID_STATUS + 511, ICON_SPINNER, TY_DISPLAY);
+                TY_TextColored(ID_STATUS + 512, "正在加载排行榜...", TY_BODY, ds_theme->muted);
+            }
+        } else if (!g_state->ranking_list || g_state->ranking_count == 0) {
+            CLAY(CLAY_SIDI(CLAY_STRING("RankingEmpty"), ID_STATUS + 510), {
+                .layout = {
+                    .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(200) },
+                    .childAlignment = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                    .childGap = DS_SPACE_3,
+                }
+            }) {
+                TY_Text(ID_STATUS + 511, "\xf0\x9f\x92\xa4", TY_DISPLAY);
+                TY_TextColored(ID_STATUS + 512, "暂无排行数据", TY_H3, ds_theme->subtext);
+            }
+        } else {
+            /* 3-column scrollable grid/list */
+            UI_SCROLLCOL(ID_STATUS + 520, DS_SPACE_3) {
+                size_t i = 0;
+                size_t count = g_state->ranking_count;
+                int row_idx = 0;
+                while (i < count) {
+                    UI_ROW(ID_STATUS + 600 + row_idx * 2, DS_SPACE_3) {
+                        for (int col = 0; col < 3 && i < count; col++, i++) {
+                            bool inst = false;
+                            /* Check installed list */
+                            for (size_t k = 0; k < g_state->installed_count; k++) {
+                                LinyapsPackageInfo *ins = g_state->installed_list[k];
+                                if (ins && ins->id && g_state->ranking_list[i]->id &&
+                                    strcmp(ins->id, g_state->ranking_list[i]->id) == 0) {
+                                    inst = true;
+                                    break;
+                                }
+                            }
+                            ranking_app_card((int)i, (int)(i + 1), g_state->ranking_list[i], inst);
+                        }
+                        /* Fill empty columns in last row */
+                        for (int col = (int)(count - i); col > 0 && col < 3 && (count % 3 != 0) && i >= count; col++) {
+                            CLAY(CLAY_SIDI(CLAY_STRING("RankCardFill"), ID_STATUS + 800 + col), {
+                                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CARD_H) } },
+                            }) {}
+                        }
+                    }
+                    row_idx++;
+                }
+            }
+        }
+    }
+}
+
 /* ================================================================
  * Main content area
  * ================================================================ */
@@ -701,6 +925,19 @@ static void content_area(void)
     }) {
         if (g_state->active_nav == NAV_UPDATES) {
             updates_view();
+        } else if (g_state->active_nav == NAV_RANKING) {
+            /* Scrollable card grid with padding */
+            CLAY(CLAY_SIDI(CLAY_STRING("RankingWrap"), ID_ROOT + 4), {
+                .layout = {
+                    .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                    .padding         = { DS_SPACE_4, DS_SPACE_4, DS_SPACE_4, DS_SPACE_4 },
+                    .childGap        = DS_SPACE_3,
+                },
+                .backgroundColor = ds_theme->base,
+            }) {
+                ranking_view();
+            }
         } else {
             category_tab_bar();
 

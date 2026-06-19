@@ -22,6 +22,7 @@
 #define EVT_CHECK_UPDATES_READY   1u   /* check updates finished */
 #define EVT_UPDATE_ITEM_PROGRESS  2u   /* update progress update */
 #define EVT_UPDATE_ITEM_FINISHED  3u   /* update finished */
+#define EVT_RANKING_READY         4u   /* ranking list arrived */
 
 typedef struct {
     LinyapsPackageInfo **list;
@@ -239,6 +240,94 @@ static void start_remote_fetch(void)
     pthread_attr_destroy(&attr);
 }
 
+static void *fetch_ranking_thread(void *arg)
+{
+    int tab_type = (int)(intptr_t)arg;
+    size_t count = 0;
+    long   total = 0;
+
+    LinyapsRankingType rtype = (tab_type == 0) ? LINYAPS_RANKING_NEWEST : LINYAPS_RANKING_DOWNLOADS;
+
+    LinyapsRemoteAppInfo **remote = linyaps_remote_fetch_ranking(
+        rtype, 1, 100, &count, &total);
+
+    /* Convert to LinyapsPackageInfo** */
+    LinyapsPackageInfo **list = NULL;
+    if (remote && count > 0) {
+        list = calloc(count, sizeof(*list));
+        if (list) {
+            for (size_t i = 0; i < count; i++)
+                list[i] = linyaps_remote_app_info_to_package_info(remote[i]);
+        }
+        linyaps_remote_app_info_list_free(remote, count);
+    }
+
+    LOG_INFO("ranking", "排行远端拉取完成: type=%d count=%zu total=%ld", tab_type, count, total);
+
+    /* Post result back to the main thread via SDL user event */
+    RemoteResult *res = malloc(sizeof(*res));
+    if (res) {
+        res->list  = list;
+        res->count = count;
+        SDL_Event ev;
+        SDL_zero(ev);
+        ev.type       = g_user_event_type;
+        ev.user.code  = EVT_RANKING_READY;
+        ev.user.data1 = res;
+        ev.user.data2 = (void*)(intptr_t)tab_type;
+        SDL_PushEvent(&ev);
+    } else {
+        linyaps_package_info_list_free(list, count);
+    }
+    return NULL;
+}
+
+static void start_ranking_fetch(int tab_type)
+{
+    g_store->loading_ranking = true;
+    g_store->dirty = true;
+
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&tid, &attr, fetch_ranking_thread, (void*)(intptr_t)tab_type) != 0) {
+        LOG_WARN("ranking", "无法创建后台排行拉取线程");
+        g_store->loading_ranking = false;
+    }
+    pthread_attr_destroy(&attr);
+}
+
+void store_ui_trigger_change_nav(NavItem item)
+{
+    if (g_store->active_nav == item) return;
+    g_store->active_nav = item;
+    g_store->current_page = 0;
+    g_store->dirty = true;
+
+    if (item == NAV_RANKING) {
+        /* Fetch ranking list for current active tab if not loaded or switch */
+        start_ranking_fetch(g_store->ranking_tab);
+    }
+}
+
+void store_ui_trigger_change_ranking_tab(int tab_idx)
+{
+    if (g_store->ranking_tab == tab_idx) return;
+    g_store->ranking_tab = tab_idx;
+    g_store->current_page = 0;
+    g_store->dirty = true;
+
+    /* Free old ranking list */
+    if (g_store->ranking_list) {
+        linyaps_package_info_list_free(g_store->ranking_list, g_store->ranking_count);
+        g_store->ranking_list = NULL;
+        g_store->ranking_count = 0;
+    }
+
+    start_ranking_fetch(tab_idx);
+}
+
 /* ------------------------------------------------------------------ */
 /* Search callback                                                     */
 /* ------------------------------------------------------------------ */
@@ -396,6 +485,32 @@ int main(int argc, char *argv[])
                     store.search_count   = res->count;
                     store.current_page   = 0;
                     store.dirty = true;
+                    free(res);
+                }
+                continue;
+            }
+
+            /* ---- Ranking remote fetch completed ---- */
+            if (g_user_event_type != (Uint32)-1 &&
+                e.type == g_user_event_type &&
+                e.user.code == EVT_RANKING_READY) {
+                RemoteResult *res = e.user.data1;
+                int tab_type = (int)(intptr_t)e.user.data2;
+                if (res) {
+                    LOG_INFO("main", "排行数据到达, type=%d count=%zu", tab_type, res->count);
+                    /* Only apply if the current active ranking tab matches the response type */
+                    if (store.ranking_tab == tab_type) {
+                        if (store.ranking_list) {
+                            linyaps_package_info_list_free(store.ranking_list, store.ranking_count);
+                        }
+                        store.ranking_list = res->list;
+                        store.ranking_count = res->count;
+                        store.loading_ranking = false;
+                        store.dirty = true;
+                    } else {
+                        /* discard */
+                        linyaps_package_info_list_free(res->list, res->count);
+                    }
                     free(res);
                 }
                 continue;

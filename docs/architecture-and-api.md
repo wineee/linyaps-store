@@ -192,6 +192,33 @@ cancel
 task progress
 interaction confirmation
 prune test hook
+remote rankings (newest / downloads)
+```
+
+### Remote Store API (libcurl based)
+
+We communicate with the remote community store API `https://storeapi.linyaps.org.cn` to fetch catalog search results and rankings.
+
+```c
+typedef enum {
+    LINYAPS_RANKING_NEWEST = 0,
+    LINYAPS_RANKING_DOWNLOADS,
+} LinyapsRankingType;
+
+LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
+    const char *keyword,
+    const char *category_id,
+    int page,
+    int page_size,
+    size_t *out_count,
+    long   *out_total);
+
+LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(
+    LinyapsRankingType type,
+    int                page,
+    int                page_size,
+    size_t            *out_count,
+    long              *out_total);
 ```
 
 Intentionally not implemented:

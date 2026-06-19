@@ -119,6 +119,12 @@ typedef struct {
     /* theme */
     bool dark_mode;
 
+    /* ranking */
+    int                  ranking_tab;      /* 0 = 最新上架榜, 1 = 下载量榜 */
+    bool                 loading_ranking;
+    LinyapsPackageInfo **ranking_list;
+    size_t               ranking_count;
+
     /* pagination */
     int current_page;
 
