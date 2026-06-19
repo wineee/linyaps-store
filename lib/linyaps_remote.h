@@ -113,6 +113,21 @@ void linyaps_remote_app_info_list_free(LinyapsRemoteAppInfo **list, size_t count
  */
 LinyapsPackageInfo *linyaps_remote_app_info_to_package_info(const LinyapsRemoteAppInfo *info);
 
+/**
+ * linyaps_remote_check_updates — 批量检查应用更新
+ *
+ * @installed_apps: 已安装应用列表
+ * @installed_count: 已安装应用数量
+ * @out_count:       [out] 有更新的应用数量
+ *
+ * 调用 POST /app/appCheckUpdate 接口，返回有更新的应用列表。
+ * 返回的列表需要用 linyaps_remote_app_info_list_free 释放。
+ */
+LinyapsRemoteAppInfo **linyaps_remote_check_updates(
+    const LinyapsPackageInfo **installed_apps,
+    size_t                    installed_count,
+    size_t                   *out_count);
+
 #ifdef __cplusplus
 }
 #endif

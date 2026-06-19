@@ -353,6 +353,92 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(
 }
 
 /* ================================================================== */
+/* 批量检查更新                                                         */
+/* ================================================================== */
+
+LinyapsRemoteAppInfo **linyaps_remote_check_updates(
+    const LinyapsPackageInfo **installed_apps,
+    size_t                    installed_count,
+    size_t                   *out_count)
+{
+    if (out_count) *out_count = 0;
+    if (!installed_apps || installed_count == 0) return NULL;
+
+    /* 构建请求体: [{"appId": "xxx", "arch": "x86_64", "version": "1.0.0"}, ...] */
+    cJSON *req = cJSON_CreateArray();
+    if (!req) return NULL;
+
+    char arch_buf[32] = "x86_64";
+    struct utsname uts;
+    if (uname(&uts) == 0 && uts.machine[0] != '\0') {
+        snprintf(arch_buf, sizeof(arch_buf), "%s", uts.machine);
+    }
+
+    for (size_t i = 0; i < installed_count; i++) {
+        const LinyapsPackageInfo *app = installed_apps[i];
+        if (!app || !app->id || !app->version) continue;
+
+        cJSON *item = cJSON_CreateObject();
+        if (!item) continue;
+
+        cJSON_AddStringToObject(item, "appId", app->id);
+        cJSON_AddStringToObject(item, "arch", app->arch ? app->arch : arch_buf);
+        cJSON_AddStringToObject(item, "version", app->version);
+        cJSON_AddItemToArray(req, item);
+    }
+
+    char *body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!body) return NULL;
+
+    LOG_DEBUG("remote", "POST %s/app/appCheckUpdate body=%s", LINYAPS_REMOTE_BASE_URL, body);
+
+    char url[256];
+    snprintf(url, sizeof(url), "%s/app/appCheckUpdate", LINYAPS_REMOTE_BASE_URL);
+
+    char *resp_raw = http_post_json(url, body);
+    free(body);
+    if (!resp_raw) {
+        LOG_ERR("remote", "[check_updates] HTTP request failed");
+        return NULL;
+    }
+
+    cJSON *root = cJSON_Parse(resp_raw);
+    free(resp_raw);
+    if (!root) {
+        LOG_ERR("remote", "[check_updates] JSON parse error");
+        return NULL;
+    }
+
+    /* 检查 code == 200 */
+    const cJSON *code_item = cJSON_GetObjectItemCaseSensitive(root, "code");
+    if (!cJSON_IsNumber(code_item) || (int)code_item->valuedouble != 200) {
+        const cJSON *msg = cJSON_GetObjectItemCaseSensitive(root, "message");
+        LOG_ERR("remote", "[check_updates] API error: %s",
+                cJSON_IsString(msg) ? msg->valuestring : "(no message)");
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    /* 解析 data 数组 (直接是 AppDetailDTO 数组) */
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    if (!cJSON_IsArray(data)) {
+        LOG_WARN("remote", "[check_updates] no data array in response");
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    size_t count = 0;
+    LinyapsRemoteAppInfo **list = parse_records_array(data, &count);
+
+    LOG_INFO("remote", "[check_updates] returned %zu apps with updates", count);
+
+    cJSON_Delete(root);
+    if (out_count) *out_count = count;
+    return list;
+}
+
+/* ================================================================== */
 /* 内存管理                                                             */
 /* ================================================================== */
 

@@ -11,6 +11,7 @@
 #include <SDL3/SDL_main.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
@@ -306,10 +307,110 @@ static void start_simulated_update(StoreUpdateItem *item)
 
 #endif /* LINYAPS_SIMULATE_UPDATES */
 
+/* ------------------------------------------------------------------ */
+/* Check updates thread (real implementation)                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * UpdateCheckResult - 存储检查更新结果
+ */
+typedef struct {
+    StoreUpdateItem *items;
+    size_t           count;
+} UpdateCheckResult;
+
+static void *check_updates_real_thread(void *arg)
+{
+    (void)arg;
+    LOG_INFO("updates", "开始检查应用更新...");
+
+    /* 获取已安装应用列表 */
+    size_t installed_count = 0;
+    LinyapsPackageInfo **installed = linyaps_list_installed(g_store->ctx, &installed_count);
+    if (!installed || installed_count == 0) {
+        LOG_INFO("updates", "没有已安装的应用，跳过更新检查");
+        linyaps_package_info_list_free(installed, installed_count);
+        post_user_event(EVT_CHECK_UPDATES_READY, NULL, NULL);
+        return NULL;
+    }
+
+    LOG_INFO("updates", "已安装 %zu 个应用，调用批量检查更新 API", installed_count);
+
+    /* 调用批量检查更新 API */
+    size_t remote_count = 0;
+    LinyapsRemoteAppInfo **remote = linyaps_remote_check_updates(
+        (const LinyapsPackageInfo **)installed, installed_count, &remote_count);
+
+    /* 存储有更新的应用 */
+    StoreUpdateItem *updates = NULL;
+    size_t update_count = 0;
+
+    if (remote && remote_count > 0) {
+        /* 构建已安装应用的 ID 到信息的映射 */
+        updates = calloc(remote_count, sizeof(StoreUpdateItem));
+        if (updates) {
+            for (size_t i = 0; i < remote_count; i++) {
+                LinyapsRemoteAppInfo *remote_app = remote[i];
+                if (!remote_app || !remote_app->base.id || !remote_app->base.version) continue;
+
+                /* 查找对应的已安装应用获取当前版本 */
+                const char *current_ver = NULL;
+                for (size_t j = 0; j < installed_count; j++) {
+                    if (installed[j] && installed[j]->id &&
+                        strcmp(installed[j]->id, remote_app->base.id) == 0) {
+                        current_ver = installed[j]->version;
+                        break;
+                    }
+                }
+
+                StoreUpdateItem *item = &updates[update_count];
+                item->id = strdup(remote_app->base.id);
+                item->name = strdup(remote_app->base.name ? remote_app->base.name : remote_app->base.id);
+                item->current_version = strdup(current_ver ? current_ver : "0.0.0");
+                item->new_version = strdup(remote_app->base.version);
+                item->channel = strdup(remote_app->base.channel ? remote_app->base.channel : "main");
+                SDL_SetAtomicInt(&item->updating, 0);
+                SDL_SetAtomicInt(&item->progress_int, 0);
+                item->task_path = NULL;
+                update_count++;
+
+                LOG_INFO("updates", "发现更新: %s %s -> %s",
+                         remote_app->base.id,
+                         current_ver ? current_ver : "0.0.0",
+                         remote_app->base.version);
+            }
+        }
+        linyaps_remote_app_info_list_free(remote, remote_count);
+    }
+
+    linyaps_package_info_list_free(installed, installed_count);
+
+    /* 发送结果到主线程 */
+    UpdateCheckResult *result = malloc(sizeof(UpdateCheckResult));
+    if (result) {
+        result->items = updates;
+        result->count = update_count;
+        post_user_event(EVT_CHECK_UPDATES_READY, result, NULL);
+    } else {
+        /* 内存分配失败，释放更新列表 */
+        for (size_t i = 0; i < update_count; i++) {
+            free(updates[i].id);
+            free(updates[i].name);
+            free(updates[i].current_version);
+            free(updates[i].new_version);
+            free(updates[i].channel);
+            free(updates[i].task_path);
+        }
+        free(updates);
+        post_user_event(EVT_CHECK_UPDATES_READY, NULL, NULL);
+    }
+
+    LOG_INFO("updates", "更新检查完成，发现 %zu 个可更新应用", update_count);
+    return NULL;
+}
 
 void store_ui_trigger_check_updates(void)
 {
-#ifdef LINYAPS_SIMULATE_UPDATES
     if (!g_store || SDL_GetAtomicInt(&g_store->checking_updates)) return;
     SDL_SetAtomicInt(&g_store->checking_updates, 1);
     SDL_SetAtomicInt(&g_store->dirty, 1);
@@ -318,14 +419,11 @@ void store_ui_trigger_check_updates(void)
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    if (pthread_create(&tid, &attr, check_updates_thread, NULL) != 0) {
+    if (pthread_create(&tid, &attr, check_updates_real_thread, NULL) != 0) {
         LOG_WARN("updates", "无法创建检查更新线程");
         SDL_SetAtomicInt(&g_store->checking_updates, 0);
     }
     pthread_attr_destroy(&attr);
-#else
-    LOG_INFO("updates", "check_updates: 模拟未启用，跳过");
-#endif
 }
 
 void store_ui_trigger_update_item(StoreUpdateItem *item)
@@ -614,35 +712,33 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
     /* ---- Check updates completed ---- */
     case EVT_CHECK_UPDATES_READY: {
         SDL_SetAtomicInt(&store->checking_updates, 0);
-#ifdef LINYAPS_SIMULATE_UPDATES
-        if (store->update_count == 0) {
-            store->update_count = 3;
-            store->update_list = calloc(store->update_count, sizeof(*store->update_list));
-            if (store->update_list) {
-                store->update_list[0] = (StoreUpdateItem){
-                    .id = strdup("cn.wps.wps-office"),
-                    .name = strdup("WPS Office For Linux 个人版"),
-                    .current_version = strdup("12.1.2.25882"),
-                    .new_version = strdup("12.1.2.26885"),
-                    .channel = strdup("main"),
-                };
-                store->update_list[1] = (StoreUpdateItem){
-                    .id = strdup("com.microsoft.edge"),
-                    .name = strdup("Microsoft Edge"),
-                    .current_version = strdup("148.0.3967.86"),
-                    .new_version = strdup("149.0.4022.69"),
-                    .channel = strdup("main"),
-                };
-                store->update_list[2] = (StoreUpdateItem){
-                    .id = strdup("org.localsend.localsend"),
-                    .name = strdup("LocalSend"),
-                    .current_version = strdup("1.17.0.3"),
-                    .new_version = strdup("1.17.0.5"),
-                    .channel = strdup("main"),
-                };
+
+        /* 释放旧的更新列表 */
+        if (store->update_list) {
+            for (size_t i = 0; i < store->update_count; i++) {
+                free(store->update_list[i].id);
+                free(store->update_list[i].name);
+                free(store->update_list[i].current_version);
+                free(store->update_list[i].new_version);
+                free(store->update_list[i].channel);
+                free(store->update_list[i].task_path);
             }
+            free(store->update_list);
+            store->update_list = NULL;
+            store->update_count = 0;
         }
-#endif
+
+        /* 处理更新检查结果 */
+        UpdateCheckResult *result = e->user.data1;
+        if (result) {
+            store->update_list = result->items;
+            store->update_count = result->count;
+            free(result);
+            LOG_INFO("updates", "更新检查完成，发现 %zu 个可更新应用", store->update_count);
+        } else {
+            LOG_INFO("updates", "更新检查完成，未发现可更新应用");
+        }
+
         SDL_SetAtomicInt(&store->dirty, 1);
         return true;
     }
@@ -769,6 +865,9 @@ int main(int argc, char *argv[])
 
     LOG_INFO("main", "启动远端应用列表拉取...");
     start_remote_fetch(NULL, "__welcome__", 1);
+
+    /* 启动时自动检查更新 */
+    store_ui_trigger_check_updates();
 
     /* ---- Event loop ---- */
     InputState input = { false, false, 0, 0 };

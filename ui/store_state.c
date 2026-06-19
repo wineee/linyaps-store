@@ -16,32 +16,9 @@ void store_state_init(StoreState *s, LinyapsContext *ctx)
     s->window_h   = 720;
     SDL_SetAtomicInt(&s->dirty, 1);
 
-    /* Initialize default updates matching reference screenshot */
-    s->update_count = 3;
-    s->update_list = calloc(s->update_count, sizeof(*s->update_list));
-    if (s->update_list) {
-        s->update_list[0] = (StoreUpdateItem){
-            .id = strdup("cn.wps.wps-office"),
-            .name = strdup("WPS Office For Linux 个人版"),
-            .current_version = strdup("12.1.2.25882"),
-            .new_version = strdup("12.1.2.26885"),
-            .channel = strdup("main"),
-        };
-        s->update_list[1] = (StoreUpdateItem){
-            .id = strdup("com.microsoft.edge"),
-            .name = strdup("Microsoft Edge"),
-            .current_version = strdup("148.0.3967.86"),
-            .new_version = strdup("149.0.4022.69"),
-            .channel = strdup("main"),
-        };
-        s->update_list[2] = (StoreUpdateItem){
-            .id = strdup("org.localsend.localsend"),
-            .name = strdup("LocalSend"),
-            .current_version = strdup("1.17.0.3"),
-            .new_version = strdup("1.17.0.5"),
-            .channel = strdup("main"),
-        };
-    }
+    /* 更新列表将在启动时通过真实 API 检查后填充 */
+    s->update_count = 0;
+    s->update_list = NULL;
 }
 
 void store_state_free(StoreState *s)
