@@ -7,7 +7,7 @@
 
 ## 项目概览
 
-`linyaps-store` 是 Deepin 桌面的 Linglong 应用商店，使用原生 C23 实现。
+`linyaps-store` 是第三方 Linglong 应用商店，使用原生 C23 实现。
 
 ```
 UI (Clay / KilnUI)
