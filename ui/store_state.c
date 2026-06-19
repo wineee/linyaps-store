@@ -12,6 +12,8 @@ void store_state_init(StoreState *s, LinyapsContext *ctx)
     s->active_nav = NAV_RECOMMENDED;
     s->active_cat = CAT_ALL;
     s->dark_mode  = true;
+    s->window_w   = 1280;
+    s->window_h   = 720;
     s->dirty      = true;
 
     /* Initialize default updates matching reference screenshot */

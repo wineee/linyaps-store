@@ -116,12 +116,76 @@ static void launch_app(const char *app_id)
 #define SIDEBAR_W         160
 #define CARD_H            72
 #define ICON_PLACEHOLDER  48
+#define GRID_MIN_CARD_W   300
+#define GRID_TARGET_CARD_W 360
+#define GRID_MAX_CARD_W   460
+#define GRID_MAX_COLS     6
+#define TITLEBAR_H        52
+#define CONTENT_HEADER_H  44
+#define GRID_PAGE_H       40
 
 /* ================================================================
  * Helpers
  * ================================================================ */
 
 static StoreState *g_state = NULL;
+
+typedef struct {
+    int cols;
+    int rows;
+    int card_w;
+    int items_per_page;
+} AppGridSpec;
+
+static int iabs_int(int v)
+{
+    return v < 0 ? -v : v;
+}
+
+static int clamp_int(int v, int min, int max)
+{
+    if (v < min) return min;
+    if (v > max) return max;
+    return v;
+}
+
+static AppGridSpec app_grid_spec(int reserve_h)
+{
+    const int gap = DS_SPACE_3;
+    int content_w = g_state->window_w - SIDEBAR_W - DS_SPACE_4 * 2;
+    int content_h = g_state->window_h - TITLEBAR_H - reserve_h - DS_SPACE_4 * 2;
+    if (content_w < 1) content_w = 1;
+    if (content_h < CARD_H) content_h = CARD_H;
+
+    int max_fit_cols = (content_w + gap) / (GRID_MIN_CARD_W + gap);
+    max_fit_cols = clamp_int(max_fit_cols, 1, GRID_MAX_COLS);
+
+    int best_cols = 1;
+    int best_w = content_w;
+    int best_score = 1000000;
+    for (int cols = 1; cols <= max_fit_cols; cols++) {
+        int w = (content_w - gap * (cols - 1)) / cols;
+        int score = iabs_int(w - GRID_TARGET_CARD_W);
+        if (w > GRID_MAX_CARD_W) score += (w - GRID_MAX_CARD_W) * 2;
+        if (score < best_score) {
+            best_score = score;
+            best_cols = cols;
+            best_w = w;
+        }
+    }
+
+    int rows_h = content_h - GRID_PAGE_H;
+    int rows = (rows_h + gap) / (CARD_H + gap);
+    rows = clamp_int(rows, 1, 12);
+
+    AppGridSpec spec = {
+        .cols = best_cols,
+        .rows = rows,
+        .card_w = best_w,
+        .items_per_page = best_cols * rows,
+    };
+    return spec;
+}
 
 /* Compact helper: fixed-size colored rectangle (icon placeholder) */
 static void icon_placeholder(int uid, int size)
@@ -292,7 +356,7 @@ static void category_tab_bar(void)
  * Single app card
  * ================================================================ */
 
-static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installed)
+static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installed, int card_w)
 {
     int base = ID_CARD_BASE + card_idx * 20;
 
@@ -303,7 +367,7 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
 
     CLAY(card_id, {
         .layout = {
-            .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CARD_H) },
+            .sizing          = { CLAY_SIZING_FIXED((float)card_w), CLAY_SIZING_FIXED(CARD_H) },
             .layoutDirection = CLAY_LEFT_TO_RIGHT,
             .padding         = { DS_SPACE_3, DS_SPACE_3, DS_SPACE_3, DS_SPACE_3 },
             .childGap        = DS_SPACE_3,
@@ -365,7 +429,7 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
 }
 
 /* ================================================================
- * App grid (3-column)
+ * App grid
  * ================================================================ */
 
 static void app_grid(void)
@@ -405,7 +469,14 @@ static void app_grid(void)
         return;
     }
 
-    int items_per_page = 12; // 3 columns * 4 rows
+    int reserve_h = 0;
+    if (g_state->active_nav == NAV_ALL ||
+        g_state->active_nav == NAV_RECOMMENDED ||
+        (g_state->active_nav >= NAV_CAT_OFFICE && g_state->active_nav <= NAV_CAT_GAMES)) {
+        reserve_h += CONTENT_HEADER_H;
+    }
+    AppGridSpec spec = app_grid_spec(reserve_h);
+    int items_per_page = spec.items_per_page;
     int total_pages = (count + items_per_page - 1) / items_per_page;
     if (g_state->current_page >= total_pages) g_state->current_page = total_pages - 1;
     if (g_state->current_page < 0) g_state->current_page = 0;
@@ -418,12 +489,12 @@ static void app_grid(void)
     UI_COL(ID_STATUS + 9, DS_SPACE_3) {
         /* App Grid */
         UI_COL(ID_STATUS + 10, DS_SPACE_3) {
-            /* Rows of 3 cards each */
             size_t i = start_idx;
             int row_idx = 0;
             while (i < end_idx) {
                 UI_ROW(ID_STATUS + 20 + row_idx * 2, DS_SPACE_3) {
-                    for (int col = 0; col < 3 && i < end_idx; col++, i++) {
+                    int col = 0;
+                    for (; col < spec.cols && i < end_idx; col++, i++) {
                         bool inst = false;
                         /* Check installed list */
                         for (size_t k = 0; k < g_state->installed_count; k++) {
@@ -434,14 +505,11 @@ static void app_grid(void)
                                 break;
                             }
                         }
-                        app_card((int)i, list[i], inst);
+                        app_card((int)i, list[i], inst, spec.card_w);
                     }
-                    /* Fill empty columns in last row */
-                    for (int col = (int)((end_idx - start_idx) - (i - start_idx - ((end_idx - start_idx) % 3 == 0 ? 3 : (end_idx - start_idx) % 3)));
-                         (end_idx - start_idx) % 3 != 0 && col < 3 && row_idx == (int)((end_idx - start_idx - 1) / 3); col++) {
-                        /* invisible filler */
+                    for (; col < spec.cols; col++) {
                         CLAY(CLAY_SIDI(CLAY_STRING("CardFill"), ID_STATUS + 50 + col), {
-                            .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CARD_H) } },
+                            .layout = { .sizing = { CLAY_SIZING_FIXED((float)spec.card_w), CLAY_SIZING_FIXED(CARD_H) } },
                         }) {}
                     }
                 }
@@ -766,7 +834,7 @@ static const char *format_download_count(int64_t count)
     return buf;
 }
 
-static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *info, bool installed)
+static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *info, bool installed, int card_w)
 {
     int base = ID_CARD_BASE + 20000 + card_idx * 20;
 
@@ -776,7 +844,7 @@ static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *i
 
     CLAY(card_id, {
         .layout = {
-            .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CARD_H) },
+            .sizing          = { CLAY_SIZING_FIXED((float)card_w), CLAY_SIZING_FIXED(CARD_H) },
             .layoutDirection = CLAY_LEFT_TO_RIGHT,
             .padding         = { DS_SPACE_3, DS_SPACE_3, DS_SPACE_3, DS_SPACE_3 },
             .childGap        = DS_SPACE_3,
@@ -974,14 +1042,15 @@ static void ranking_view(void)
                 TY_TextColored(ID_STATUS + 512, "暂无排行数据", TY_H3, ds_theme->subtext);
             }
         } else {
-            /* 3-column scrollable grid/list */
+            AppGridSpec spec = app_grid_spec(44 + GRID_PAGE_H);
             UI_SCROLLCOL(ID_STATUS + 520, DS_SPACE_3) {
                 size_t i = 0;
                 size_t count = g_state->ranking_count;
                 int row_idx = 0;
                 while (i < count) {
                     UI_ROW(ID_STATUS + 600 + row_idx * 2, DS_SPACE_3) {
-                        for (int col = 0; col < 3 && i < count; col++, i++) {
+                        int col = 0;
+                        for (; col < spec.cols && i < count; col++, i++) {
                             bool inst = false;
                             /* Check installed list */
                             for (size_t k = 0; k < g_state->installed_count; k++) {
@@ -992,12 +1061,11 @@ static void ranking_view(void)
                                     break;
                                 }
                             }
-                            ranking_app_card((int)i, (int)(g_state->current_page * 30 + i + 1), g_state->ranking_list[i], inst);
+                            ranking_app_card((int)i, (int)(g_state->current_page * 30 + i + 1), g_state->ranking_list[i], inst, spec.card_w);
                         }
-                        /* Fill empty columns in last row */
-                        for (int col = (int)(count - i); col > 0 && col < 3 && (count % 3 != 0) && i >= count; col++) {
+                        for (; col < spec.cols; col++) {
                             CLAY(CLAY_SIDI(CLAY_STRING("RankCardFill"), ID_STATUS + 800 + col), {
-                                .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CARD_H) } },
+                                .layout = { .sizing = { CLAY_SIZING_FIXED((float)spec.card_w), CLAY_SIZING_FIXED(CARD_H) } },
                             }) {}
                         }
                     }

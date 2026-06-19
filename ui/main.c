@@ -727,6 +727,17 @@ int main(int argc, char *argv[])
             if (r > 0) store.dirty = true;
         }
 
+        int pixel_w = 0;
+        int pixel_h = 0;
+        SDL_GetWindowSizeInPixels(ctx.window, &pixel_w, &pixel_h);
+        int window_w = (int)((float)pixel_w / ctx.dpi_scale);
+        int window_h = (int)((float)pixel_h / ctx.dpi_scale);
+        if (window_w != store.window_w || window_h != store.window_h) {
+            store.window_w = window_w;
+            store.window_h = window_h;
+            store.dirty = true;
+        }
+
         if (store.dirty) {
             UI_SetPointerState(mouse_down, mouse_released, mx, my);
             store_ui_handle_pre_layout_actions(&store, mouse_released);

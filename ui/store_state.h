@@ -120,6 +120,10 @@ typedef struct {
     /* theme */
     bool dark_mode;
 
+    /* current logical window size, refreshed before layout */
+    int window_w;
+    int window_h;
+
     /* ranking */
     int                  ranking_tab;      /* 0 = 最新上架榜, 1 = 下载量榜 */
     bool                 loading_ranking;
