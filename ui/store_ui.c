@@ -338,7 +338,7 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
 
         /* Action button — capture return value to handle clicks */
         if (installed) {
-            if (UI_Button(base + 5, "打开", UI_BTN_GHOST, UI_BTN_SM, false)) {
+            if (UI_Button(base + 5, "打开", UI_BTN_SECONDARY, UI_BTN_SM, false)) {
                 const char *app_id = info->id ? info->id : NULL;
                 LOG_INFO("ui", "打开按钮点击: id=%s", app_id ? app_id : "(unknown)");
                 launch_app(app_id);
@@ -875,7 +875,7 @@ static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *i
 
         /* Action button */
         if (installed) {
-            if (UI_Button(base + 5, "打开", UI_BTN_GHOST, UI_BTN_SM, false)) {
+            if (UI_Button(base + 5, "打开", UI_BTN_SECONDARY, UI_BTN_SM, false)) {
                 const char *app_id = info->id ? info->id : NULL;
                 LOG_INFO("ui", "打开按钮点击: id=%s", app_id ? app_id : "(unknown)");
                 launch_app(app_id);
