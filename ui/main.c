@@ -53,15 +53,19 @@ static void *check_updates_thread(void *arg)
 
 void store_ui_trigger_check_updates(void)
 {
-    if (!g_store || g_store->checking_updates) return;
-    g_store->checking_updates = true;
-    g_store->dirty = true;
+    if (!g_store || SDL_GetAtomicInt(&g_store->checking_updates)) return;
+    SDL_SetAtomicInt(&g_store->checking_updates, 1);
+    SDL_SetAtomicInt(&g_store->dirty, 1);
 
     pthread_t tid;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&tid, &attr, check_updates_thread, NULL);
+    if (pthread_create(&tid, &attr, check_updates_thread, NULL) != 0) {
+        LOG_WARN("updates", "无法创建检查更新线程");
+        SDL_SetAtomicInt(&g_store->checking_updates, 0);
+        SDL_SetAtomicInt(&g_store->dirty, 1);
+    }
     pthread_attr_destroy(&attr);
 }
 
@@ -81,7 +85,7 @@ static void *simulate_update_thread(void *arg)
         p += 0.05f;
         if (p > 1.0f) p = 1.0f;
 
-        item->progress = p;
+        SDL_SetAtomicInt(&item->progress_int, (int)(p * 100.0f));
 
         SDL_Event ev;
         SDL_zero(ev);
@@ -107,7 +111,8 @@ static void on_update_progress(const LinyapsTaskProgress *prog, void *userdata)
     StoreUpdateItem *item = userdata;
     if (!item || !g_store) return;
 
-    item->progress = (float)prog->percentage;
+    /* Convert float percentage (0.0-1.0) to integer (0-100) for atomic storage */
+    SDL_SetAtomicInt(&item->progress_int, (int)(prog->percentage * 100.0f));
 
     if (prog->state == LINYAPS_TASK_STATE_SUCCEED) {
         SDL_Event ev;
@@ -117,8 +122,8 @@ static void on_update_progress(const LinyapsTaskProgress *prog, void *userdata)
         ev.user.data1 = item;
         SDL_PushEvent(&ev);
     } else if (prog->state == LINYAPS_TASK_STATE_FAILED || prog->state == LINYAPS_TASK_STATE_CANCELED) {
-        item->updating = false;
-        item->progress = 0.0f;
+        SDL_SetAtomicInt(&item->updating, 0);
+        SDL_SetAtomicInt(&item->progress_int, 0);
         SDL_Event ev;
         SDL_zero(ev);
         ev.type = g_user_event_type;
@@ -137,11 +142,11 @@ static void on_update_progress(const LinyapsTaskProgress *prog, void *userdata)
 
 void store_ui_trigger_update_item(StoreUpdateItem *item)
 {
-    if (!g_store || !item || item->updating) return;
+    if (!g_store || !item || SDL_GetAtomicInt(&item->updating)) return;
 
-    item->updating = true;
-    item->progress = 0.0f;
-    g_store->dirty = true;
+    SDL_SetAtomicInt(&item->updating, 1);
+    SDL_SetAtomicInt(&item->progress_int, 0);
+    SDL_SetAtomicInt(&g_store->dirty, 1);
 
     bool use_simulation = true;
 
@@ -171,10 +176,15 @@ void store_ui_trigger_update_item(StoreUpdateItem *item)
             pthread_attr_t attr;
             pthread_attr_init(&attr);
             pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-            pthread_create(&tid, &attr, simulate_update_thread, task);
+            if (pthread_create(&tid, &attr, simulate_update_thread, task) != 0) {
+                LOG_WARN("updates", "无法创建模拟更新线程");
+                SDL_SetAtomicInt(&item->updating, 0);
+                SDL_SetAtomicInt(&item->progress_int, 0);
+                free(task);
+            }
             pthread_attr_destroy(&attr);
         } else {
-            item->updating = false;
+            SDL_SetAtomicInt(&item->updating, 0);
         }
     }
 }
@@ -183,7 +193,7 @@ void store_ui_trigger_update_all(void)
 {
     if (!g_store) return;
     for (size_t i = 0; i < g_store->update_count; i++) {
-        if (!g_store->update_list[i].updating) {
+        if (!SDL_GetAtomicInt(&g_store->update_list[i].updating)) {
             store_ui_trigger_update_item(&g_store->update_list[i]);
         }
     }
@@ -262,8 +272,8 @@ static void *fetch_remote_thread(void *arg)
 
 static void start_remote_fetch(const char *category_id)
 {
-    g_store->loading_remote = true;
-    g_store->dirty = true;
+    SDL_SetAtomicInt(&g_store->loading_remote, 1);
+    SDL_SetAtomicInt(&g_store->dirty, 1);
 
     char *cat_copy = category_id ? strdup(category_id) : NULL;
 
@@ -274,7 +284,7 @@ static void start_remote_fetch(const char *category_id)
     if (pthread_create(&tid, &attr, fetch_remote_thread, cat_copy) != 0) {
         LOG_WARN("remote", "无法创建后台远端拉取线程");
         free(cat_copy);
-        g_store->loading_remote = false;
+        SDL_SetAtomicInt(&g_store->loading_remote, 0);
     }
     pthread_attr_destroy(&attr);
 }
@@ -328,8 +338,8 @@ static void *fetch_ranking_thread(void *arg)
 
 static void start_ranking_fetch(int tab_type, int page)
 {
-    g_store->loading_ranking = true;
-    g_store->dirty = true;
+    SDL_SetAtomicInt(&g_store->loading_ranking, 1);
+    SDL_SetAtomicInt(&g_store->dirty, 1);
 
     uintptr_t val = (tab_type & 0xFF) | ((page & 0xFFFF) << 8);
 
@@ -339,7 +349,7 @@ static void start_ranking_fetch(int tab_type, int page)
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     if (pthread_create(&tid, &attr, fetch_ranking_thread, (void*)val) != 0) {
         LOG_WARN("ranking", "无法创建后台排行拉取线程");
-        g_store->loading_ranking = false;
+        SDL_SetAtomicInt(&g_store->loading_ranking, 0);
     }
     pthread_attr_destroy(&attr);
 }
@@ -349,7 +359,7 @@ void store_ui_trigger_change_nav(NavItem item)
     if (g_store->active_nav == item) return;
     g_store->active_nav = item;
     g_store->current_page = 0;
-    g_store->dirty = true;
+    SDL_SetAtomicInt(&g_store->dirty, 1);
 
     if (item == NAV_RANKING) {
         start_ranking_fetch(g_store->ranking_tab, g_store->current_page + 1);
@@ -369,7 +379,7 @@ void store_ui_trigger_change_category_tab(CategoryTab tab)
     if (g_store->active_cat == tab) return;
     g_store->active_cat = tab;
     g_store->current_page = 0;
-    g_store->dirty = true;
+    SDL_SetAtomicInt(&g_store->dirty, 1);
 
     start_remote_fetch(get_category_id_by_tab(tab));
 }
@@ -379,7 +389,7 @@ void store_ui_trigger_change_ranking_tab(int tab_idx)
     if (g_store->ranking_tab == tab_idx) return;
     g_store->ranking_tab = tab_idx;
     g_store->current_page = 0;
-    g_store->dirty = true;
+    SDL_SetAtomicInt(&g_store->dirty, 1);
 
     /* Free old ranking list */
     if (g_store->ranking_list) {
@@ -396,7 +406,7 @@ void store_ui_trigger_change_ranking_page(int page_idx)
 {
     if (page_idx < 0) return;
     g_store->current_page = page_idx;
-    g_store->dirty = true;
+    SDL_SetAtomicInt(&g_store->dirty, 1);
 
     /* Free old ranking list */
     if (g_store->ranking_list) {
@@ -437,7 +447,7 @@ static void on_search_results(LinyapsPackageInfo **items,
         s->search_results = NULL;
         s->search_count   = 0;
     }
-    s->dirty = true;
+    SDL_SetAtomicInt(&s->dirty, 1);
 }
 
 /* ------------------------------------------------------------------ */
@@ -450,7 +460,7 @@ static void handle_text_input(StoreState *s, const char *text)
     size_t add_len = strlen(text);
     if (cur_len + add_len < sizeof(s->search_buf) - 1) {
         strcat(s->search_buf, text);
-        s->dirty = true;
+        SDL_SetAtomicInt(&s->dirty, 1);
     }
 }
 
@@ -460,17 +470,17 @@ static void handle_key(StoreState *s, SDL_Keycode key)
 
     if (key == SDLK_BACKSPACE) {
         size_t len = strlen(s->search_buf);
-        if (len > 0) { s->search_buf[len - 1] = '\0'; s->dirty = true; }
+        if (len > 0) { s->search_buf[len - 1] = '\0'; SDL_SetAtomicInt(&s->dirty, 1); }
     } else if (key == SDLK_ESCAPE) {
         s->search_focused = false;
-        s->dirty = true;
+        SDL_SetAtomicInt(&s->dirty, 1);
     } else if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
         if (s->search_buf[0] && s->ctx) {
             LOG_INFO("search", "开始搜索: keyword=\"%s\"", s->search_buf);
             linyaps_search(s->ctx, s->search_buf, NULL, on_search_results, s);
         }
         s->search_focused = false;
-        s->dirty = true;
+        SDL_SetAtomicInt(&s->dirty, 1);
     }
 }
 
@@ -540,12 +550,12 @@ int main(int argc, char *argv[])
         mouse_released = false;
 
         /* Wait for event when idle (zero CPU usage) */
-        if (!store.dirty) {
+        if (!SDL_GetAtomicInt(&store.dirty)) {
             SDL_WaitEvent(NULL);
         }
 
         while (SDL_PollEvent(&e)) {
-            store.dirty = true;
+            SDL_SetAtomicInt(&store.dirty, 1);
 
             if (e.type == SDL_EVENT_QUIT) { running = false; break; }
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE
@@ -579,8 +589,8 @@ int main(int argc, char *argv[])
                         store.search_results = res->list;
                         store.search_count   = res->count;
                         store.current_page   = 0;
-                        store.loading_remote = false;
-                        store.dirty = true;
+                        SDL_SetAtomicInt(&store.loading_remote, 0);
+                        SDL_SetAtomicInt(&store.dirty, 1);
                     } else {
                         linyaps_package_info_list_free(res->list, res->count);
                     }
@@ -608,8 +618,8 @@ int main(int argc, char *argv[])
                         store.ranking_list = res->list;
                         store.ranking_count = res->count;
                         store.ranking_total = res->total;
-                        store.loading_ranking = false;
-                        store.dirty = true;
+                        SDL_SetAtomicInt(&store.loading_ranking, 0);
+                        SDL_SetAtomicInt(&store.dirty, 1);
                     } else {
                         /* discard */
                         linyaps_package_info_list_free(res->list, res->count);
@@ -623,7 +633,7 @@ int main(int argc, char *argv[])
             if (g_user_event_type != (Uint32)-1 &&
                 e.type == g_user_event_type &&
                 e.user.code == EVT_CHECK_UPDATES_READY) {
-                store.checking_updates = false;
+                SDL_SetAtomicInt(&store.checking_updates, 0);
                 if (store.update_count == 0) {
                     /* Repopulate mock data so the user can test updates again */
                     store.update_count = 3;
@@ -652,7 +662,7 @@ int main(int argc, char *argv[])
                         };
                     }
                 }
-                store.dirty = true;
+                SDL_SetAtomicInt(&store.dirty, 1);
                 continue;
             }
 
@@ -660,7 +670,7 @@ int main(int argc, char *argv[])
             if (g_user_event_type != (Uint32)-1 &&
                 e.type == g_user_event_type &&
                 e.user.code == EVT_UPDATE_ITEM_PROGRESS) {
-                store.dirty = true;
+                SDL_SetAtomicInt(&store.dirty, 1);
                 continue;
             }
 
@@ -698,7 +708,7 @@ int main(int argc, char *argv[])
                         }
                     }
                 }
-                store.dirty = true;
+                SDL_SetAtomicInt(&store.dirty, 1);
                 continue;
             }
 
@@ -724,7 +734,7 @@ int main(int argc, char *argv[])
         /* Process D-Bus messages if backend is alive */
         if (lctx) {
             int r = linyaps_process(lctx);
-            if (r > 0) store.dirty = true;
+            if (r > 0) SDL_SetAtomicInt(&store.dirty, 1);
         }
 
         int pixel_w = 0;
@@ -735,10 +745,10 @@ int main(int argc, char *argv[])
         if (window_w != store.window_w || window_h != store.window_h) {
             store.window_w = window_w;
             store.window_h = window_h;
-            store.dirty = true;
+            SDL_SetAtomicInt(&store.dirty, 1);
         }
 
-        if (store.dirty) {
+        if (SDL_GetAtomicInt(&store.dirty)) {
             UI_SetPointerState(mouse_down, mouse_released, mx, my);
             store_ui_handle_pre_layout_actions(&store, mouse_released);
 
@@ -747,7 +757,7 @@ int main(int argc, char *argv[])
             float dt = 0.016f;
             Clay_RenderCommandArray cmds = Clay_EndLayout(dt);
             KilnUI_render(&ctx, cmds);
-            store.dirty = false;
+            SDL_SetAtomicInt(&store.dirty, 0);
         }
     }
 

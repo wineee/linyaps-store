@@ -4,6 +4,8 @@
 
 #include "../lib/linyaps_backend.h"
 
+#include <SDL3/SDL.h>
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -83,8 +85,8 @@ typedef struct {
     char *current_version;
     char *new_version;
     char *channel;
-    bool updating;
-    float progress;
+    SDL_AtomicInt updating;  /* 0 = idle, 1 = updating */
+    SDL_AtomicInt progress_int;  /* 0-100, multiplied by 100 for atomic ops */
     char *task_path;
 } StoreUpdateItem;
 
@@ -109,12 +111,12 @@ typedef struct {
     size_t               search_count;
     LinyapsPackageInfo **installed_list;
     size_t               installed_count;
-    bool                 loading_remote;
+    SDL_AtomicInt        loading_remote;  /* 0 = idle, 1 = loading */
 
     /* updates */
     StoreUpdateItem *update_list;
     size_t           update_count;
-    bool             checking_updates;
+    SDL_AtomicInt    checking_updates;  /* 0 = idle, 1 = checking */
     float            check_updates_timer;
 
     /* theme */
@@ -126,7 +128,7 @@ typedef struct {
 
     /* ranking */
     int                  ranking_tab;      /* 0 = 最新上架榜, 1 = 下载量榜 */
-    bool                 loading_ranking;
+    SDL_AtomicInt        loading_ranking;  /* 0 = idle, 1 = loading */
     LinyapsPackageInfo **ranking_list;
     size_t               ranking_count;
     long                 ranking_total;
@@ -135,7 +137,7 @@ typedef struct {
     int current_page;
 
     /* dirty flag driven rendering */
-    bool dirty;
+    SDL_AtomicInt dirty;  /* 0 = clean, 1 = needs redraw */
 } StoreState;
 
 void store_state_init(StoreState *s, LinyapsContext *ctx);

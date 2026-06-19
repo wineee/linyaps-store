@@ -422,7 +422,7 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
                 } else {
                     LOG_WARN("ui", "后端未连接，无法安装 %s", app_id);
                 }
-                g_state->dirty = true;
+                SDL_SetAtomicInt(&g_state->dirty, 1);
             }
         }
     }
@@ -434,7 +434,7 @@ static void app_card(int card_idx, const LinyapsPackageInfo *info, bool installe
 
 static void app_grid(void)
 {
-    if (g_state->loading_remote) {
+    if (SDL_GetAtomicInt(&g_state->loading_remote)) {
         CLAY(CLAY_SIDI(CLAY_STRING("GridLoading"), ID_STATUS + 110), {
             .layout = {
                 .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(200) },
@@ -527,7 +527,7 @@ static void app_grid(void)
                 if (UI_Button(ID_STATUS + 83, "上一页", g_state->current_page > 0 ? UI_BTN_SECONDARY : UI_BTN_GHOST, UI_BTN_SM, false)) {
                     if (g_state->current_page > 0) {
                         g_state->current_page--;
-                        g_state->dirty = true;
+                        SDL_SetAtomicInt(&g_state->dirty, 1);
                     }
                 }
                 
@@ -541,7 +541,7 @@ static void app_grid(void)
                 if (UI_Button(ID_STATUS + 85, "下一页", g_state->current_page < total_pages - 1 ? UI_BTN_SECONDARY : UI_BTN_GHOST, UI_BTN_SM, false)) {
                     if (g_state->current_page < total_pages - 1) {
                         g_state->current_page++;
-                        g_state->dirty = true;
+                        SDL_SetAtomicInt(&g_state->dirty, 1);
                     }
                 }
                 
@@ -605,7 +605,7 @@ static void titlebar(void)
                                         false);
             if (ir.clicked) {
                 g_state->search_focused = true;
-                g_state->dirty          = true;
+                SDL_SetAtomicInt(&g_state->dirty, 1);
             }
         }
 
@@ -652,7 +652,7 @@ static void updates_view(void)
             UI_ROW(ID_STATUS + 101, DS_SPACE_3) {
                 /* Left title text */
                 const char *header_text = "";
-                if (g_state->checking_updates) {
+                if (SDL_GetAtomicInt(&g_state->checking_updates)) {
                     header_text = "正在检查可更新的应用...";
                 } else if (g_state->update_count > 0) {
                     header_text = store_ui_frame_str("共 %zu 个应用可更新", g_state->update_count);
@@ -664,7 +664,7 @@ static void updates_view(void)
                 UI_SPACER(ID_STATUS + 103);
 
                 /* Right buttons */
-                if (g_state->checking_updates) {
+                if (SDL_GetAtomicInt(&g_state->checking_updates)) {
                     /* Disabled loading buttons */
                     UI_Button(ID_STATUS + 104, "\xe2\x86\xba  正在检查...", UI_BTN_GHOST, UI_BTN_SM, true);
                     UI_Button(ID_STATUS + 105, "\xe2\x86\xba  全部更新", UI_BTN_PRIMARY, UI_BTN_SM, true);
@@ -682,7 +682,7 @@ static void updates_view(void)
 
             /* Scrollable list of update cards */
             UI_SCROLLCOL(ID_STATUS + 110, DS_SPACE_3) {
-                if (g_state->checking_updates) {
+                if (SDL_GetAtomicInt(&g_state->checking_updates)) {
                     /* Show a nice loading placeholder */
                     CLAY(CLAY_SIDI(CLAY_STRING("CheckingPlaceholder"), ID_STATUS + 111), {
                         .layout = {
@@ -754,9 +754,10 @@ static void updates_view(void)
                             }) {
                                 TY_Text(base + 3, item->name ? item->name : item->id, TY_H4);
 
-                                if (item->updating) {
-                                    const char *prog_text = store_ui_frame_str("正在更新中... %.0f%%", item->progress * 100.0f);
-                                    UI_Progress(base + 4, prog_text, item->progress, 1.0f);
+                                if (SDL_GetAtomicInt(&item->updating)) {
+                                    float progress = SDL_GetAtomicInt(&item->progress_int) / 100.0f;
+                                    const char *prog_text = store_ui_frame_str("正在更新中... %.0f%%", progress * 100.0f);
+                                    UI_Progress(base + 4, prog_text, progress, 1.0f);
                                 } else {
                                     const char *ver_text = store_ui_frame_str("%s  \xe2\x86\x92  %s",
                                              item->current_version ? item->current_version : "0.0.0",
@@ -773,7 +774,7 @@ static void updates_view(void)
                                 .layout = { .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1) } }
                             }) {}
 
-                            if (item->updating) {
+                            if (SDL_GetAtomicInt(&item->updating)) {
                                 UI_Button(base + 11, "\xe2\x86\xba  更新中", UI_BTN_GHOST, UI_BTN_SM, true);
                             } else {
                                 if (UI_Button(base + 11, "\xe2\x86\xba  更新", UI_BTN_PRIMARY, UI_BTN_SM, false)) {
@@ -963,7 +964,7 @@ static void ranking_app_card(int card_idx, int rank, const LinyapsPackageInfo *i
                 } else {
                     LOG_WARN("ui", "后端未连接，无法安装 %s", app_id);
                 }
-                g_state->dirty = true;
+                SDL_SetAtomicInt(&g_state->dirty, 1);
             }
         }
     }
@@ -1017,7 +1018,7 @@ static void ranking_view(void)
         }
 
         /* Content List */
-        if (g_state->loading_ranking) {
+        if (SDL_GetAtomicInt(&g_state->loading_ranking)) {
             CLAY(CLAY_SIDI(CLAY_STRING("RankingLoading"), ID_STATUS + 510), {
                 .layout = {
                     .sizing = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(200) },
@@ -1233,6 +1234,6 @@ void store_ui_handle_pre_layout_actions(StoreState *state, bool mouse_released)
     if (Clay_PointerOver(theme_id)) {
         state->dark_mode = !state->dark_mode;
         DS_SetTheme(state->dark_mode ? &DS_THEME_DARK : &DS_THEME_LIGHT);
-        state->dirty = true;
+        SDL_SetAtomicInt(&state->dirty, 1);
     }
 }

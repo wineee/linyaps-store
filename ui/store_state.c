@@ -14,7 +14,7 @@ void store_state_init(StoreState *s, LinyapsContext *ctx)
     s->dark_mode  = true;
     s->window_w   = 1280;
     s->window_h   = 720;
-    s->dirty      = true;
+    SDL_SetAtomicInt(&s->dirty, 1);
 
     /* Initialize default updates matching reference screenshot */
     s->update_count = 3;

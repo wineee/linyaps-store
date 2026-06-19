@@ -80,6 +80,13 @@ void search_push(LinyapsContext *ctx,
         return;
     }
     op->job_id = dupstr(job_id);
+    if (!op->job_id) {
+        free(op);
+        if (cb) {
+            cb(NULL, 0, -ENOMEM, "out of memory", userdata);
+        }
+        return;
+    }
     op->cb = cb;
     op->userdata = userdata;
     op->next = ctx->searches;

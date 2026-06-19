@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/utsname.h>
 
 /* ------------------------------------------------------------------ */
 /* 内部：curl 写回调                                                    */
@@ -97,6 +98,20 @@ static int64_t jint64(const cJSON *obj, const char *field)
 }
 
 /* ------------------------------------------------------------------ */
+/* 内部：添加系统架构                                                   */
+/* ------------------------------------------------------------------ */
+
+static void add_system_arch(cJSON *req)
+{
+    char arch_buf[32] = "x86_64";
+    struct utsname uts;
+    if (uname(&uts) == 0 && uts.machine[0] != '\0') {
+        snprintf(arch_buf, sizeof(arch_buf), "%s", uts.machine);
+    }
+    cJSON_AddStringToObject(req, "arch", arch_buf);
+}
+
+/* ------------------------------------------------------------------ */
 /* 内部：解析单条记录                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -179,17 +194,7 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
     cJSON_AddStringToObject(req, "repoName", LINYAPS_REMOTE_REPO_NAME);
     cJSON_AddNumberToObject(req, "pageNo",   page);
     cJSON_AddNumberToObject(req, "pageSize", page_size > 0 ? page_size : LINYAPS_REMOTE_PAGE_SIZE);
-    /* arch: detect from uname -m, default x86_64 */
-    {
-        const char *arch = "x86_64";
-        FILE *fp = popen("uname -m 2>/dev/null", "r");
-        char arch_buf[32] = "x86_64";
-        if (fp) { fgets(arch_buf, sizeof(arch_buf), fp); pclose(fp); }
-        size_t al = strlen(arch_buf);
-        while (al > 0 && (arch_buf[al-1] == '\n' || arch_buf[al-1] == '\r')) arch_buf[--al] = '\0';
-        if (al > 0) arch = arch_buf;
-        cJSON_AddStringToObject(req, "arch", arch);
-    }
+    add_system_arch(req);
     if (category_id && *category_id)
         cJSON_AddStringToObject(req, "categoryId", category_id);
 
@@ -280,17 +285,7 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_welcome_apps(
     cJSON_AddStringToObject(req, "repoName", LINYAPS_REMOTE_REPO_NAME);
     cJSON_AddNumberToObject(req, "pageNo",   page);
     cJSON_AddNumberToObject(req, "pageSize", page_size > 0 ? page_size : LINYAPS_REMOTE_PAGE_SIZE);
-    /* arch: detect from uname -m, default x86_64 */
-    {
-        const char *arch = "x86_64";
-        FILE *fp = popen("uname -m 2>/dev/null", "r");
-        char arch_buf[32] = "x86_64";
-        if (fp) { fgets(arch_buf, sizeof(arch_buf), fp); pclose(fp); }
-        size_t al = strlen(arch_buf);
-        while (al > 0 && (arch_buf[al-1] == '\n' || arch_buf[al-1] == '\r')) arch_buf[--al] = '\0';
-        if (al > 0) arch = arch_buf;
-        cJSON_AddStringToObject(req, "arch", arch);
-    }
+    add_system_arch(req);
 
     char *body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
@@ -433,18 +428,7 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(
     cJSON_AddStringToObject(req, "repoName", LINYAPS_REMOTE_REPO_NAME);
     cJSON_AddNumberToObject(req, "pageNo",   page);
     cJSON_AddNumberToObject(req, "pageSize", page_size > 0 ? page_size : LINYAPS_REMOTE_PAGE_SIZE);
-
-    /* arch: detect from uname -m, default x86_64 */
-    {
-        const char *arch = "x86_64";
-        FILE *fp = popen("uname -m 2>/dev/null", "r");
-        char arch_buf[32] = "x86_64";
-        if (fp) { fgets(arch_buf, sizeof(arch_buf), fp); pclose(fp); }
-        size_t al = strlen(arch_buf);
-        while (al > 0 && (arch_buf[al-1] == '\n' || arch_buf[al-1] == '\r')) arch_buf[--al] = '\0';
-        if (al > 0) arch = arch_buf;
-        cJSON_AddStringToObject(req, "arch", arch);
-    }
+    add_system_arch(req);
 
     char *body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
