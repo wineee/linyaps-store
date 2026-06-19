@@ -44,7 +44,12 @@ add_subdirectory(kilnui)
 add_executable(linyaps_store_app
     ui/main.c
     ui/store_state.c
-    ui/store_ui.c)
+    ui/store_ui.c
+    ui/views/sidebar.c
+    ui/views/titlebar.c
+    ui/views/app_grid.c
+    ui/views/updates_view.c
+    ui/views/ranking_view.c)
 
 target_include_directories(linyaps_store_app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/lib

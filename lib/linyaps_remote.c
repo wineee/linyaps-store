@@ -61,7 +61,6 @@ static char *http_post_json(const char *url, const char *body)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, LINYAPS_REMOTE_TIMEOUT_SEC);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    /* Don't verify SSL for dev/offline environments — change in production */
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
 
     CURLcode rc = curl_easy_perform(curl);
@@ -77,7 +76,7 @@ static char *http_post_json(const char *url, const char *body)
 }
 
 /* ------------------------------------------------------------------ */
-/* 内部：JSON 字符串辅助                                                */
+/* 内部：JSON 字符串/数值辅助                                           */
 /* ------------------------------------------------------------------ */
 
 static char *jdup(const cJSON *obj, const char *field)
@@ -91,14 +90,13 @@ static int64_t jint64(const cJSON *obj, const char *field)
 {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, field);
     if (cJSON_IsNumber(item)) return (int64_t)item->valuedouble;
-    /* size may be a string in API response */
     if (cJSON_IsString(item) && item->valuestring)
         return (int64_t)atoll(item->valuestring);
     return 0;
 }
 
 /* ------------------------------------------------------------------ */
-/* 内部：添加系统架构                                                   */
+/* 内部：添加系统架构到请求                                              */
 /* ------------------------------------------------------------------ */
 
 static void add_system_arch(cJSON *req)
@@ -109,6 +107,21 @@ static void add_system_arch(cJSON *req)
         snprintf(arch_buf, sizeof(arch_buf), "%s", uts.machine);
     }
     cJSON_AddStringToObject(req, "arch", arch_buf);
+}
+
+/* ------------------------------------------------------------------ */
+/* 内部：给请求添加公共分页字段                                          */
+/* ------------------------------------------------------------------ */
+
+static cJSON *new_page_request(int page, int page_size)
+{
+    cJSON *req = cJSON_CreateObject();
+    if (!req) return NULL;
+    cJSON_AddStringToObject(req, "repoName", LINYAPS_REMOTE_REPO_NAME);
+    cJSON_AddNumberToObject(req, "pageNo",   page);
+    cJSON_AddNumberToObject(req, "pageSize", page_size > 0 ? page_size : LINYAPS_REMOTE_PAGE_SIZE);
+    add_system_arch(req);
+    return req;
 }
 
 /* ------------------------------------------------------------------ */
@@ -174,7 +187,108 @@ static LinyapsRemoteAppInfo *parse_record(const cJSON *obj)
 }
 
 /* ------------------------------------------------------------------ */
-/* 公开：linyaps_remote_fetch_apps                                      */
+/* 内部：解析 records 数组为 AppInfo 列表                                */
+/* ------------------------------------------------------------------ */
+
+static LinyapsRemoteAppInfo **parse_records_array(const cJSON *records,
+                                                   size_t      *out_count)
+{
+    LinyapsRemoteAppInfo **list = NULL;
+    size_t count = 0, cap = 0;
+
+    const cJSON *obj = NULL;
+    cJSON_ArrayForEach(obj, records) {
+        LinyapsRemoteAppInfo *info = parse_record(obj);
+        if (!info) continue;
+
+        if (count >= cap) {
+            cap = cap == 0 ? 32 : cap * 2;
+            LinyapsRemoteAppInfo **tmp = realloc(list, cap * sizeof(*list));
+            if (!tmp) { linyaps_remote_app_info_free(info); break; }
+            list = tmp;
+        }
+        list[count++] = info;
+    }
+
+    if (out_count) *out_count = count;
+    return list;
+}
+
+/* ------------------------------------------------------------------ */
+/* 内部：远端 API 通用分页请求                                          */
+/*                                                                     */
+/* 1. POST JSON → 2. 解析响应 → 3. 验证 code==200 → 4. 提取 records  */
+/* ------------------------------------------------------------------ */
+
+static LinyapsRemoteAppInfo **remote_fetch_page(cJSON       *req,
+                                                 const char  *url,
+                                                 const char  *tag,
+                                                 size_t      *out_count,
+                                                 long        *out_total)
+{
+    if (out_count) *out_count = 0;
+    if (out_total) *out_total = 0;
+    if (!req) return NULL;
+
+    char *body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!body) return NULL;
+
+    LOG_DEBUG("remote", "POST %s body=%s", url, body);
+
+    char *resp_raw = http_post_json(url, body);
+    free(body);
+    if (!resp_raw) {
+        LOG_ERR("remote", "[%s] HTTP request failed", tag);
+        return NULL;
+    }
+
+    cJSON *root = cJSON_Parse(resp_raw);
+    free(resp_raw);
+    if (!root) {
+        LOG_ERR("remote", "[%s] JSON parse error", tag);
+        return NULL;
+    }
+
+    /* Check code == 200 */
+    const cJSON *code_item = cJSON_GetObjectItemCaseSensitive(root, "code");
+    if (!cJSON_IsNumber(code_item) || (int)code_item->valuedouble != 200) {
+        const cJSON *msg = cJSON_GetObjectItemCaseSensitive(root, "message");
+        LOG_ERR("remote", "[%s] API error: %s", tag,
+                cJSON_IsString(msg) ? msg->valuestring : "(no message)");
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    const cJSON *data    = cJSON_GetObjectItemCaseSensitive(root, "data");
+    const cJSON *records = cJSON_GetObjectItemCaseSensitive(data, "records");
+    const cJSON *total_j = cJSON_GetObjectItemCaseSensitive(data, "total");
+
+    if (!cJSON_IsArray(records)) {
+        LOG_WARN("remote", "[%s] no records array in response", tag);
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    long total = cJSON_IsNumber(total_j) ? (long)total_j->valuedouble : 0;
+    if (out_total) *out_total = total;
+
+    size_t count = 0;
+    LinyapsRemoteAppInfo **list = parse_records_array(records, &count);
+
+    LOG_INFO("remote", "[%s] fetched records=%zu total=%ld", tag, count, total);
+
+    cJSON_Delete(root);
+    if (out_count) *out_count = count;
+    return list;
+}
+
+/* ================================================================== */
+/* 公开 API                                                             */
+/* ================================================================== */
+
+/* ------------------------------------------------------------------ */
+/* 搜索 / 分类                                                          */
 /* ------------------------------------------------------------------ */
 
 LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
@@ -185,91 +299,20 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
     size_t     *out_count,
     long       *out_total)
 {
-    if (out_count) *out_count = 0;
-    if (out_total) *out_total = 0;
-
-    /* Build JSON request body */
-    cJSON *req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "keyword",  keyword ? keyword : "");
-    cJSON_AddStringToObject(req, "repoName", LINYAPS_REMOTE_REPO_NAME);
-    cJSON_AddNumberToObject(req, "pageNo",   page);
-    cJSON_AddNumberToObject(req, "pageSize", page_size > 0 ? page_size : LINYAPS_REMOTE_PAGE_SIZE);
-    add_system_arch(req);
+    cJSON *req = new_page_request(page, page_size);
+    if (!req) return NULL;
+    cJSON_AddStringToObject(req, "keyword", keyword ? keyword : "");
     if (category_id && *category_id)
         cJSON_AddStringToObject(req, "categoryId", category_id);
 
-    char *body = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-    if (!body) return NULL;
-
     char url[256];
     snprintf(url, sizeof(url), "%s/visit/getSearchAppList", LINYAPS_REMOTE_BASE_URL);
-
-    LOG_DEBUG("remote", "POST %s body=%s", url, body);
-
-    char *resp_raw = http_post_json(url, body);
-    free(body);
-
-    if (!resp_raw) {
-        LOG_ERR("remote", "HTTP request failed");
-        return NULL;
-    }
-
-    cJSON *root = cJSON_Parse(resp_raw);
-    free(resp_raw);
-
-    if (!root) {
-        LOG_ERR("remote", "JSON parse error");
-        return NULL;
-    }
-
-    /* Check code == 200 */
-    const cJSON *code_item = cJSON_GetObjectItemCaseSensitive(root, "code");
-    if (!cJSON_IsNumber(code_item) || (int)code_item->valuedouble != 200) {
-        const cJSON *msg = cJSON_GetObjectItemCaseSensitive(root, "message");
-        LOG_ERR("remote", "API error: %s",
-                cJSON_IsString(msg) ? msg->valuestring : "(no message)");
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    const cJSON *data    = cJSON_GetObjectItemCaseSensitive(root, "data");
-    const cJSON *records = cJSON_GetObjectItemCaseSensitive(data, "records");
-    const cJSON *total_j = cJSON_GetObjectItemCaseSensitive(data, "total");
-
-    if (!cJSON_IsArray(records)) {
-        LOG_WARN("remote", "no records array in response");
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    long total = cJSON_IsNumber(total_j) ? (long)total_j->valuedouble : 0;
-    if (out_total) *out_total = total;
-
-    int n = cJSON_GetArraySize(records);
-    LOG_INFO("remote", "fetched page=%d records=%d total=%ld", page, n, total);
-
-    LinyapsRemoteAppInfo **list = NULL;
-    size_t count = 0, cap = 0;
-
-    const cJSON *obj = NULL;
-    cJSON_ArrayForEach(obj, records) {
-        LinyapsRemoteAppInfo *info = parse_record(obj);
-        if (!info) continue;
-
-        if (count >= cap) {
-            cap = cap == 0 ? 32 : cap * 2;
-            LinyapsRemoteAppInfo **tmp = realloc(list, cap * sizeof(*list));
-            if (!tmp) { linyaps_remote_app_info_free(info); break; }
-            list = tmp;
-        }
-        list[count++] = info;
-    }
-
-    cJSON_Delete(root);
-    if (out_count) *out_count = count;
-    return list;
+    return remote_fetch_page(req, url, "search", out_count, out_total);
 }
+
+/* ------------------------------------------------------------------ */
+/* 欢迎页                                                              */
+/* ------------------------------------------------------------------ */
 
 LinyapsRemoteAppInfo **linyaps_remote_fetch_welcome_apps(
     int page,
@@ -277,97 +320,44 @@ LinyapsRemoteAppInfo **linyaps_remote_fetch_welcome_apps(
     size_t *out_count,
     long   *out_total)
 {
-    if (out_count) *out_count = 0;
-    if (out_total) *out_total = 0;
-
-    /* Build JSON request body */
-    cJSON *req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "repoName", LINYAPS_REMOTE_REPO_NAME);
-    cJSON_AddNumberToObject(req, "pageNo",   page);
-    cJSON_AddNumberToObject(req, "pageSize", page_size > 0 ? page_size : LINYAPS_REMOTE_PAGE_SIZE);
-    add_system_arch(req);
-
-    char *body = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-    if (!body) return NULL;
+    cJSON *req = new_page_request(page, page_size);
+    if (!req) return NULL;
 
     char url[256];
     snprintf(url, sizeof(url), "%s/visit/getWelcomeAppList", LINYAPS_REMOTE_BASE_URL);
-
-    LOG_DEBUG("remote", "POST %s body=%s", url, body);
-
-    char *resp_raw = http_post_json(url, body);
-    free(body);
-
-    if (!resp_raw) {
-        LOG_ERR("remote", "HTTP request failed");
-        return NULL;
-    }
-
-    cJSON *root = cJSON_Parse(resp_raw);
-    free(resp_raw);
-
-    if (!root) {
-        LOG_ERR("remote", "JSON parse error");
-        return NULL;
-    }
-
-    /* Check code == 200 */
-    const cJSON *code_item = cJSON_GetObjectItemCaseSensitive(root, "code");
-    if (!cJSON_IsNumber(code_item) || (int)code_item->valuedouble != 200) {
-        const cJSON *msg = cJSON_GetObjectItemCaseSensitive(root, "message");
-        LOG_ERR("remote", "API error: %s",
-                cJSON_IsString(msg) ? msg->valuestring : "(no message)");
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    const cJSON *data    = cJSON_GetObjectItemCaseSensitive(root, "data");
-    const cJSON *records = cJSON_GetObjectItemCaseSensitive(data, "records");
-    const cJSON *total_j = cJSON_GetObjectItemCaseSensitive(data, "total");
-
-    if (!cJSON_IsArray(records)) {
-        LOG_WARN("remote", "no records array in response");
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    long total = cJSON_IsNumber(total_j) ? (long)total_j->valuedouble : 0;
-    if (out_total) *out_total = total;
-
-    int n = cJSON_GetArraySize(records);
-    LOG_INFO("remote", "fetched page=%d records=%d total=%ld", page, n, total);
-
-    LinyapsRemoteAppInfo **list = NULL;
-    size_t count = 0, cap = 0;
-
-    const cJSON *obj = NULL;
-    cJSON_ArrayForEach(obj, records) {
-        LinyapsRemoteAppInfo *info = parse_record(obj);
-        if (!info) continue;
-
-        if (count >= cap) {
-            cap = cap == 0 ? 32 : cap * 2;
-            LinyapsRemoteAppInfo **tmp = realloc(list, cap * sizeof(*list));
-            if (!tmp) { linyaps_remote_app_info_free(info); break; }
-            list = tmp;
-        }
-        list[count++] = info;
-    }
-
-    cJSON_Delete(root);
-    if (out_count) *out_count = count;
-    return list;
+    return remote_fetch_page(req, url, "welcome", out_count, out_total);
 }
 
 /* ------------------------------------------------------------------ */
-/* 公开：内存管理                                                        */
+/* 排行榜                                                              */
 /* ------------------------------------------------------------------ */
+
+LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(
+    LinyapsRankingType type,
+    int                page,
+    int                page_size,
+    size_t            *out_count,
+    long              *out_total)
+{
+    cJSON *req = new_page_request(page, page_size);
+    if (!req) return NULL;
+
+    char url[256];
+    if (type == LINYAPS_RANKING_NEWEST) {
+        snprintf(url, sizeof(url), "%s/visit/getNewAppList", LINYAPS_REMOTE_BASE_URL);
+    } else {
+        snprintf(url, sizeof(url), "%s/visit/getInstallAppList", LINYAPS_REMOTE_BASE_URL);
+    }
+    return remote_fetch_page(req, url, "ranking", out_count, out_total);
+}
+
+/* ================================================================== */
+/* 内存管理                                                             */
+/* ================================================================== */
 
 void linyaps_remote_app_info_free(LinyapsRemoteAppInfo *info)
 {
     if (!info) return;
-    /* free base fields */
     free(info->base.id);
     free(info->base.name);
     free(info->base.version);
@@ -382,7 +372,6 @@ void linyaps_remote_app_info_free(LinyapsRemoteAppInfo *info)
     free(info->base.schema_version);
     free(info->base.command);
     free(info->base.create_time);
-    /* remote-only fields */
     free(info->icon_url);
     free(info->zh_name);
     free(info->category_id);
@@ -411,98 +400,4 @@ LinyapsPackageInfo *linyaps_remote_app_info_to_package_info(const LinyapsRemoteA
     p->size = info->base.size;
     p->download_count = info->base.download_count;
     return p;
-}
-
-LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(
-    LinyapsRankingType type,
-    int                page,
-    int                page_size,
-    size_t            *out_count,
-    long              *out_total)
-{
-    if (out_count) *out_count = 0;
-    if (out_total) *out_total = 0;
-
-    /* Build JSON request body */
-    cJSON *req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "repoName", LINYAPS_REMOTE_REPO_NAME);
-    cJSON_AddNumberToObject(req, "pageNo",   page);
-    cJSON_AddNumberToObject(req, "pageSize", page_size > 0 ? page_size : LINYAPS_REMOTE_PAGE_SIZE);
-    add_system_arch(req);
-
-    char *body = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-    if (!body) return NULL;
-
-    char url[256];
-    if (type == LINYAPS_RANKING_NEWEST) {
-        snprintf(url, sizeof(url), "%s/visit/getNewAppList", LINYAPS_REMOTE_BASE_URL);
-    } else {
-        snprintf(url, sizeof(url), "%s/visit/getInstallAppList", LINYAPS_REMOTE_BASE_URL);
-    }
-
-    LOG_DEBUG("remote", "POST %s body=%s", url, body);
-
-    char *resp_raw = http_post_json(url, body);
-    free(body);
-
-    if (!resp_raw) {
-        LOG_ERR("remote", "HTTP request failed");
-        return NULL;
-    }
-
-    cJSON *root = cJSON_Parse(resp_raw);
-    free(resp_raw);
-
-    if (!root) {
-        LOG_ERR("remote", "JSON parse error");
-        return NULL;
-    }
-
-    /* Check code == 200 */
-    const cJSON *code_item = cJSON_GetObjectItemCaseSensitive(root, "code");
-    if (!cJSON_IsNumber(code_item) || (int)code_item->valuedouble != 200) {
-        const cJSON *msg = cJSON_GetObjectItemCaseSensitive(root, "message");
-        LOG_ERR("remote", "API error: %s",
-                cJSON_IsString(msg) ? msg->valuestring : "(no message)");
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    const cJSON *data    = cJSON_GetObjectItemCaseSensitive(root, "data");
-    const cJSON *records = cJSON_GetObjectItemCaseSensitive(data, "records");
-    const cJSON *total_j = cJSON_GetObjectItemCaseSensitive(data, "total");
-
-    if (!cJSON_IsArray(records)) {
-        LOG_WARN("remote", "no records array in response");
-        cJSON_Delete(root);
-        return NULL;
-    }
-
-    long total = cJSON_IsNumber(total_j) ? (long)total_j->valuedouble : 0;
-    if (out_total) *out_total = total;
-
-    int n = cJSON_GetArraySize(records);
-    LOG_INFO("remote", "fetched ranking page=%d records=%d total=%ld", page, n, total);
-
-    LinyapsRemoteAppInfo **list = NULL;
-    size_t count = 0, cap = 0;
-
-    const cJSON *obj = NULL;
-    cJSON_ArrayForEach(obj, records) {
-        LinyapsRemoteAppInfo *info = parse_record(obj);
-        if (!info) continue;
-
-        if (count >= cap) {
-            cap = cap == 0 ? 32 : cap * 2;
-            LinyapsRemoteAppInfo **tmp = realloc(list, cap * sizeof(*list));
-            if (!tmp) { linyaps_remote_app_info_free(info); break; }
-            list = tmp;
-        }
-        list[count++] = info;
-    }
-
-    cJSON_Delete(root);
-    if (out_count) *out_count = count;
-    return list;
 }
