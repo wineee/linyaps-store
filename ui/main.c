@@ -625,6 +625,7 @@ static void handle_key(StoreState *s, SDL_Keycode key)
 typedef struct {
     bool  mouse_down;
     bool  mouse_released;
+    bool  mouse_moved;
     float mx;
     float my;
 } InputState;
@@ -793,24 +794,45 @@ static bool handle_sdl_event(StoreState *store, KilnUI *ui,
     if (e->type == SDL_EVENT_KEY_DOWN && e->key.key == SDLK_ESCAPE
         && !store->search_focused) return false;
 
-    SDL_SetAtomicInt(&store->dirty, 1);
-
-    if (e->type == SDL_EVENT_MOUSE_MOTION) {
+    /* 只在真正需要重布局的事件上设置 dirty，避免鼠标移动每帧触发全量重布局 */
+    switch (e->type) {
+    case SDL_EVENT_MOUSE_MOTION:
+        /* 鼠标移动：只更新位置，不立即设置 dirty
+         * 在主循环中检测位置变化后才设置 dirty */
         input->mx = e->motion.x;
         input->my = e->motion.y;
-    } else if (e->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        input->mouse_moved = true;
+        break;
+
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
         input->mouse_down = true;
         input->mx = e->button.x;
         input->my = e->button.y;
-    } else if (e->type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        SDL_SetAtomicInt(&store->dirty, 1);
+        break;
+
+    case SDL_EVENT_MOUSE_BUTTON_UP:
         input->mouse_down    = false;
         input->mouse_released = true;
         input->mx = e->button.x;
         input->my = e->button.y;
-    } else if (e->type == SDL_EVENT_TEXT_INPUT && store->search_focused) {
-        handle_text_input(store, e->text.text);
-    } else if (e->type == SDL_EVENT_KEY_DOWN) {
+        SDL_SetAtomicInt(&store->dirty, 1);
+        break;
+
+    case SDL_EVENT_TEXT_INPUT:
+        if (store->search_focused) {
+            handle_text_input(store, e->text.text);
+            SDL_SetAtomicInt(&store->dirty, 1);
+        }
+        break;
+
+    case SDL_EVENT_KEY_DOWN:
         handle_key(store, e->key.key);
+        SDL_SetAtomicInt(&store->dirty, 1);
+        break;
+
+    default:
+        break;
     }
 
     KilnUI_handle_event(ui, e);
@@ -876,12 +898,14 @@ int main(int argc, char *argv[])
     store_ui_trigger_check_updates();
 
     /* ---- Event loop ---- */
-    InputState input = { false, false, 0, 0 };
+    InputState input = { false, false, false, 0, 0 };
+    float prev_mx = 0, prev_my = 0;  /* 上一帧鼠标位置 */
     bool running = true;
 
     while (running) {
         SDL_Event e;
         input.mouse_released = false;
+        input.mouse_moved = false;
 
         /* Wait for event when idle (zero CPU usage) */
         if (!SDL_GetAtomicInt(&store.dirty))
@@ -896,6 +920,14 @@ int main(int argc, char *argv[])
                 { running = false; break; }
         }
         if (!running) break;
+
+        /* 鼠标移动检测：只在位置实际变化时设置 dirty
+         * Clay 需要每帧更新 hover 状态，但只有位置变化时才需要重布局 */
+        if (input.mouse_moved && (input.mx != prev_mx || input.my != prev_my)) {
+            SDL_SetAtomicInt(&store.dirty, 1);
+            prev_mx = input.mx;
+            prev_my = input.my;
+        }
 
         /* Process D-Bus messages */
         if (lctx) {

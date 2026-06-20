@@ -268,6 +268,39 @@ bool inst = id_set_contains(&g_state->installed_id_set, list[i]->id);
 用 Clay 宏构建商店 UI：侧边栏、搜索栏、分类 Tab、应用卡片网格。  
 每帧在 `dirty == true` 时重新布局，由后端回调或用户输入置 `dirty`。
 
+### 脏标志驱动渲染优化
+
+`dirty` 标志控制是否需要重布局。优化策略：
+
+```c
+// handle_sdl_event 中：只在真正需要重布局的事件上设置 dirty
+switch (e->type) {
+    case SDL_EVENT_MOUSE_MOTION:
+        // 鼠标移动：只更新位置，不立即设置 dirty
+        input->mx = e->motion.x;
+        input->my = e->motion.y;
+        input->mouse_moved = true;
+        break;
+
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_TEXT_INPUT:
+        // 点击、按键、输入：立即设置 dirty
+        SDL_SetAtomicInt(&store->dirty, 1);
+        break;
+}
+
+// 主循环中：只在鼠标位置实际变化时设置 dirty
+if (input.mouse_moved && (input.mx != prev_mx || input.my != prev_my)) {
+    SDL_SetAtomicInt(&store.dirty, 1);
+    prev_mx = input.mx;
+    prev_my = input.my;
+}
+```
+
+**效果**：鼠标静止时零 CPU 开销，只在位置变化时触发重布局。
+
 ---
 
 ## 构建
