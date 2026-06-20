@@ -22,7 +22,7 @@ add_library(linyaps_store STATIC
     lib/linyaps_dbus_msg.c
     lib/linyaps_task.c
     lib/linyaps_context.c
-    lib/linyaps_cli.c
+    lib/linyaps_local.c
     lib/linyaps_remote.c)
 target_include_directories(linyaps_store PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib)
 target_link_libraries(linyaps_store PUBLIC PkgConfig::SYSTEMD PkgConfig::CURL PRIVATE cjson)
