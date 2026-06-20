@@ -1,5 +1,6 @@
 #include "store_state.h"
 #include "store_ui.h"
+#include "id_map.h"
 
 #include "../kilnui/src/kilnui.h"
 #include "../kilnui/src/ui/ui.h"
@@ -336,6 +337,11 @@ static void *check_updates_real_thread(void *arg)
 
     LOG_INFO("updates", "已安装 %zu 个应用，调用批量检查更新 API", installed_count);
 
+    /* 构建已安装应用 ID -> 版本的哈希表，加速版本查找 */
+    IdMap installed_versions;
+    id_map_init(&installed_versions);
+    id_map_build_from_packages(&installed_versions, installed, installed_count);
+
     /* 调用批量检查更新 API */
     size_t remote_count = 0;
     LinyapsRemoteAppInfo **remote = linyaps_remote_check_updates(
@@ -352,15 +358,8 @@ static void *check_updates_real_thread(void *arg)
                 LinyapsRemoteAppInfo *remote_app = remote[i];
                 if (!remote_app || !remote_app->base.id || !remote_app->base.version) continue;
 
-                /* 查找对应的已安装应用获取当前版本 */
-                const char *current_ver = NULL;
-                for (size_t j = 0; j < installed_count; j++) {
-                    if (installed[j] && installed[j]->id &&
-                        strcmp(installed[j]->id, remote_app->base.id) == 0) {
-                        current_ver = installed[j]->version;
-                        break;
-                    }
-                }
+                /* O(1) 查找对应的已安装应用获取当前版本 */
+                const char *current_ver = id_map_get(&installed_versions, remote_app->base.id);
 
                 StoreUpdateItem *item = &updates[update_count];
                 item->id = strdup(remote_app->base.id);
@@ -382,6 +381,7 @@ static void *check_updates_real_thread(void *arg)
         linyaps_remote_app_info_list_free(remote, remote_count);
     }
 
+    id_map_free(&installed_versions);
     linyaps_package_info_list_free(installed, installed_count);
 
     /* 发送结果到主线程 */

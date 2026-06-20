@@ -70,6 +70,7 @@ add_executable(linyaps_store_app
     ui/store_state.c
     ui/store_ui.c
     ui/id_set.c
+    ui/id_map.c
     ui/views/sidebar.c
     ui/views/titlebar.c
     ui/views/app_grid.c
