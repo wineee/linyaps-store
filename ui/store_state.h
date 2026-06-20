@@ -118,6 +118,7 @@ typedef struct {
     size_t               installed_count;
     IdSet                installed_id_set; /* O(1) lookup for installed app IDs */
     SDL_AtomicInt        loading_remote;  /* 0 = idle, 1 = loading */
+    bool                 need_refetch_on_load_complete;  /* true if window resized during load */
 
     /* updates */
     StoreUpdateItem *update_list;

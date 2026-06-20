@@ -728,6 +728,22 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
                 for (size_t i = 0; i < res->count && i < 5; i++) {
                     LOG_INFO("remote", "  [%zu] id=%s name=%s", i, res->list[i]->id, res->list[i]->name);
                 }
+
+                /* Check if window resized during load and re-fetch if needed */
+                if (store->need_refetch_on_load_complete) {
+                    store->need_refetch_on_load_complete = false;
+                    LOG_DEBUG("event", "Window resized during load, re-fetching with new page size");
+                    if (store->is_searching) {
+                        start_remote_fetch(store->search_buf, NULL, 1);
+                    } else if (store->active_nav == NAV_RECOMMENDED ||
+                               store->active_nav == NAV_ALL ||
+                               (store->active_nav >= NAV_CAT_OFFICE && store->active_nav <= NAV_CAT_GAMES)) {
+                        const char *cat = current_remote_category();
+                        if (cat) {
+                            start_remote_fetch(NULL, cat, store->current_page + 1);
+                        }
+                    }
+                }
             } else {
                 linyaps_package_info_list_free(res->list, res->count);
             }
@@ -889,9 +905,28 @@ static bool handle_sdl_event(StoreState *store, KilnUI *ui,
             int window_w = (int)((float)pixel_w / ui->dpi_scale);
             int window_h = (int)((float)pixel_h / ui->dpi_scale);
             if (window_w != store->window_w || window_h != store->window_h) {
+                LOG_DEBUG("event", "Window resized: %dx%d -> %dx%d", store->window_w, store->window_h, window_w, window_h);
                 store->window_w = window_w;
                 store->window_h = window_h;
                 SDL_SetAtomicInt(&store->dirty, 1);
+
+                /* Re-fetch data with new page size based on new window dimensions */
+                int loading = SDL_GetAtomicInt(&store->loading_remote);
+                if (!loading) {
+                    if (store->is_searching) {
+                        start_remote_fetch(store->search_buf, NULL, 1);
+                    } else if (store->active_nav == NAV_RECOMMENDED ||
+                               store->active_nav == NAV_ALL ||
+                               (store->active_nav >= NAV_CAT_OFFICE && store->active_nav <= NAV_CAT_GAMES)) {
+                        const char *cat = current_remote_category();
+                        if (cat) {
+                            start_remote_fetch(NULL, cat, store->current_page + 1);
+                        }
+                    }
+                } else {
+                    /* Defer re-fetch until current load completes */
+                    store->need_refetch_on_load_complete = true;
+                }
             }
         }
         break;
