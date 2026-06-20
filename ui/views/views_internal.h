@@ -79,7 +79,7 @@ typedef struct {
     int items_per_page;
 } AppGridSpec;
 
-AppGridSpec app_grid_spec(int reserve_h);
+AppGridSpec app_grid_spec(int reserve_h, bool has_pagination);
 
 /* Icon placeholder rectangle */
 void icon_placeholder(int uid, int size);

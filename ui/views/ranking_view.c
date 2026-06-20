@@ -178,8 +178,8 @@ void view_ranking(void)
 
         /* Content */
         if (SDL_GetAtomicInt(&g_state->loading_ranking)) {
-            /* Skeleton cards while loading */
-            AppGridSpec spec = app_grid_spec(44 + GRID_PAGE_H);
+            /* Skeleton cards while loading — assume pagination */
+            AppGridSpec spec = app_grid_spec(44, true);
             CLAY(CLAY_SIDI(CLAY_STRING("RankingSkeleton"), ID_STATUS + 510), {
                 .layout = {
                     .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
@@ -260,53 +260,81 @@ void view_ranking(void)
                 TY_TextColored(ID_STATUS + 512, "暂无排行数据", TY_H3, ds_theme->subtext);
             }
         } else {
-            AppGridSpec spec = app_grid_spec(44 + GRID_PAGE_H);
-            UI_SCROLLCOL(ID_STATUS + 520, DS_SPACE_3) {
-                size_t i = 0, count = g_state->ranking_count;
-                int row_idx = 0;
-                while (i < count) {
-                    UI_ROW(ID_STATUS + 600 + row_idx * 2, DS_SPACE_3) {
-                        int col = 0;
-                        for (; col < spec.cols && i < count; col++, i++) {
-                            bool inst = (g_state->ranking_list[i]->id &&
-                                         id_set_contains(&g_state->installed_id_set,
-                                                         g_state->ranking_list[i]->id));
-                            ranking_app_card((int)i, (int)(g_state->current_page * 30 + i + 1),
-                                             g_state->ranking_list[i], inst, spec.card_w);
-                        }
-                        for (; col < spec.cols; col++) {
-                            CLAY(CLAY_SIDI(CLAY_STRING("RankCardFill"), ID_STATUS + 800 + col), {
-                                .layout = { .sizing = { CLAY_SIZING_FIXED((float)spec.card_w),
-                                                        CLAY_SIZING_FIXED(CARD_H) } },
-                            }) {}
-                        }
-                    }
-                    row_idx++;
-                }
-            }
-
-            /* Pagination */
-            long total_pages = (g_state->ranking_total + 29) / 30;
+            /* First pass: assume pagination */
+            AppGridSpec spec = app_grid_spec(44, true);
+            long total_pages = (g_state->ranking_total + spec.items_per_page - 1) / spec.items_per_page;
             if (total_pages < 1) total_pages = 1;
             int cur_p = g_state->current_page;
+            bool show_pagination = (total_pages > 1);
 
-            CLAY(CLAY_SIDI(CLAY_STRING("RankingPag"), ID_STATUS + 900), {
+            /* Second pass: if only 1 page, recalculate without pagination */
+            if (!show_pagination) {
+                spec = app_grid_spec(44, false);
+                total_pages = (g_state->ranking_total + spec.items_per_page - 1) / spec.items_per_page;
+                if (total_pages < 1) total_pages = 1;
+                show_pagination = (total_pages > 1);
+            }
+
+            CLAY(CLAY_SIDI(CLAY_STRING("RankingContent"), ID_STATUS + 519), {
                 .layout = {
-                    .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
-                    .layoutDirection = CLAY_LEFT_TO_RIGHT,
-                    .childAlignment  = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
-                    .childGap        = DS_SPACE_4,
-                    .padding         = { 0, 0, DS_SPACE_2, DS_SPACE_2 },
+                    .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                    .childGap        = DS_SPACE_3,
                 },
             }) {
-                if (UI_Button(ID_STATUS + 901, "< 上一页", UI_BTN_SECONDARY, UI_BTN_SM, cur_p <= 0))
-                    store_ui_trigger_change_ranking_page(cur_p - 1);
+                /* Scrollable grid area */
+                CLAY(CLAY_SIDI(CLAY_STRING("RankingGridScroll"), ID_STATUS + 520), {
+                    .layout = {
+                        .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                        .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                        .childGap        = DS_SPACE_3,
+                    },
+                    .clip = { .vertical = true },
+                }) {
+                    size_t i = 0, count = g_state->ranking_count;
+                    int row_idx = 0;
+                    while (i < count) {
+                        UI_ROW(ID_STATUS + 600 + row_idx * 2, DS_SPACE_3) {
+                            int col = 0;
+                            for (; col < spec.cols && i < count; col++, i++) {
+                                bool inst = (g_state->ranking_list[i]->id &&
+                                             id_set_contains(&g_state->installed_id_set,
+                                                             g_state->ranking_list[i]->id));
+                                ranking_app_card((int)i, (int)(g_state->current_page * 30 + i + 1),
+                                                 g_state->ranking_list[i], inst, spec.card_w);
+                            }
+                            for (; col < spec.cols; col++) {
+                                CLAY(CLAY_SIDI(CLAY_STRING("RankCardFill"), ID_STATUS + 800 + col), {
+                                    .layout = { .sizing = { CLAY_SIZING_FIXED((float)spec.card_w),
+                                                            CLAY_SIZING_FIXED(CARD_H) } },
+                                }) {}
+                            }
+                        }
+                        row_idx++;
+                    }
+                }
 
-                const char *page_str = store_ui_frame_str("第 %d / %ld 页", cur_p + 1, total_pages);
-                CLAY_TEXT(UI__str(page_str), { .textColor = ds_theme->text, .fontSize = DS_FS_MD });
+                /* Pagination — fixed at bottom, not scrollable */
+                if (show_pagination) {
+                    CLAY(CLAY_SIDI(CLAY_STRING("RankingPag"), ID_STATUS + 900), {
+                        .layout = {
+                            .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
+                            .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                            .childAlignment  = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                            .childGap        = DS_SPACE_4,
+                            .padding         = { DS_SPACE_2, DS_SPACE_2, 0, 0 },
+                        },
+                    }) {
+                        if (UI_Button(ID_STATUS + 901, "< 上一页", UI_BTN_SECONDARY, UI_BTN_SM, cur_p <= 0))
+                            store_ui_trigger_change_ranking_page(cur_p - 1);
 
-                if (UI_Button(ID_STATUS + 902, "下一页 >", UI_BTN_SECONDARY, UI_BTN_SM, cur_p >= total_pages - 1))
-                    store_ui_trigger_change_ranking_page(cur_p + 1);
+                        const char *page_str = store_ui_frame_str("第 %d / %ld 页", cur_p + 1, total_pages);
+                        CLAY_TEXT(UI__str(page_str), { .textColor = ds_theme->text, .fontSize = DS_FS_MD });
+
+                        if (UI_Button(ID_STATUS + 902, "下一页 >", UI_BTN_SECONDARY, UI_BTN_SM, cur_p >= total_pages - 1))
+                            store_ui_trigger_change_ranking_page(cur_p + 1);
+                    }
+                }
             }
         }
     }

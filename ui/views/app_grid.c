@@ -135,7 +135,8 @@ void view_app_grid(void)
             (g_state->active_nav >= NAV_CAT_OFFICE && g_state->active_nav <= NAV_CAT_GAMES)) {
             reserve_h += CONTENT_HEADER_H;
         }
-        AppGridSpec spec = app_grid_spec(reserve_h);
+        /* Assume pagination for skeleton (conservative estimate) */
+        AppGridSpec spec = app_grid_spec(reserve_h, true);
 
         CLAY(CLAY_SIDI(CLAY_STRING("SkeletonGrid"), ID_STATUS + 110), {
             .layout = {
@@ -180,7 +181,9 @@ void view_app_grid(void)
         (g_state->active_nav >= NAV_CAT_OFFICE && g_state->active_nav <= NAV_CAT_GAMES)) {
         reserve_h += CONTENT_HEADER_H;
     }
-    AppGridSpec spec = app_grid_spec(reserve_h);
+
+    /* First pass: assume pagination to get initial items_per_page */
+    AppGridSpec spec = app_grid_spec(reserve_h, true);
     int items_per_page = spec.items_per_page;
 
     /* Server-side pagination when remote_total is available, else client-side */
@@ -192,6 +195,21 @@ void view_app_grid(void)
         total_pages = (count + items_per_page - 1) / items_per_page;
     }
     if (total_pages < 1) total_pages = 1;
+
+    /* Second pass: if only 1 page, recalculate without pagination space reserved */
+    bool show_pagination = (total_pages > 1);
+    if (!show_pagination) {
+        spec = app_grid_spec(reserve_h, false);
+        items_per_page = spec.items_per_page;
+        /* Recalculate total_pages with new items_per_page */
+        if (use_server_paging) {
+            total_pages = (int)((g_state->remote_total + items_per_page - 1) / items_per_page);
+        } else {
+            total_pages = (count + items_per_page - 1) / items_per_page;
+        }
+        if (total_pages < 1) total_pages = 1;
+        show_pagination = (total_pages > 1);
+    }
     if (g_state->current_page >= total_pages) g_state->current_page = total_pages - 1;
     if (g_state->current_page < 0) g_state->current_page = 0;
 
@@ -199,8 +217,22 @@ void view_app_grid(void)
     size_t start_idx = 0;
     size_t end_idx = count;
 
-    UI_COL(ID_STATUS + 9, DS_SPACE_3) {
-        UI_SCROLLCOL(ID_STATUS + 10, DS_SPACE_3) {
+    CLAY(CLAY_SIDI(CLAY_STRING("AppGridRoot"), ID_STATUS + 9), {
+        .layout = {
+            .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+            .layoutDirection = CLAY_TOP_TO_BOTTOM,
+            .childGap        = DS_SPACE_3,
+        },
+    }) {
+        /* Scrollable grid area — takes remaining space */
+        CLAY(CLAY_SIDI(CLAY_STRING("GridScroll"), ID_STATUS + 10), {
+            .layout = {
+                .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0) },
+                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                .childGap        = DS_SPACE_3,
+            },
+            .clip = { .vertical = true },
+        }) {
             size_t i = start_idx;
             int row_idx = 0;
             while (i < end_idx) {
@@ -223,8 +255,7 @@ void view_app_grid(void)
             }
         }
 
-        UI_SPACER(ID_STATUS + 80);
-
+        /* Pagination bar — fixed at bottom, not scrollable */
         if (g_state->is_searching && count > 0) {
             UI_ROW(ID_STATUS + 800, DS_SPACE_3) {
                 UI_SPACER(ID_STATUS + 801);
@@ -233,10 +264,16 @@ void view_app_grid(void)
             }
         }
 
-        if (total_pages > 1) {
-            UI_ROW(ID_STATUS + 81, DS_SPACE_3) {
-                UI_SPACER(ID_STATUS + 82);
-
+        if (show_pagination) {
+            CLAY(CLAY_SIDI(CLAY_STRING("PaginationBar"), ID_STATUS + 81), {
+                .layout = {
+                    .sizing          = { CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0) },
+                    .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                    .childGap        = DS_SPACE_3,
+                    .childAlignment  = { CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER },
+                    .padding         = { DS_SPACE_2, DS_SPACE_2, 0, 0 },
+                },
+            }) {
                 bool prev_disabled = (g_state->current_page <= 0);
                 if (UI_Button(ID_STATUS + 83, "上一页",
                     prev_disabled ? UI_BTN_GHOST : UI_BTN_SECONDARY, UI_BTN_SM, prev_disabled)) {
@@ -271,8 +308,6 @@ void view_app_grid(void)
                         }
                     }
                 }
-
-                UI_SPACER(ID_STATUS + 86);
             }
         }
     }

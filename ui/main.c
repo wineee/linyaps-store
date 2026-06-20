@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "store_state.h"
 #include "store_ui.h"
+#include "views/views_internal.h"
 #include "id_map.h"
 
 #include "../kilnui/src/kilnui.h"
@@ -89,6 +90,7 @@ typedef struct {
     char *keyword;
     char *category_id;
     int   page;
+    int   page_size;
 } RemoteFetchArg;
 
 static void *fetch_remote_thread(void *arg)
@@ -103,10 +105,12 @@ static void *fetch_remote_thread(void *arg)
     long   total = 0;
 
     LinyapsRemoteAppInfo **remote = NULL;
+    int page_size = farg->page_size;
+    if (page_size < 1) page_size = 30;  /* fallback */
     if (category_id && strcmp(category_id, "__welcome__") == 0) {
-        remote = linyaps_remote_fetch_welcome_apps(page, 30, &count, &total);
+        remote = linyaps_remote_fetch_welcome_apps(page, page_size, &count, &total);
     } else {
-        remote = linyaps_remote_fetch_apps(keyword ? keyword : "", category_id, page, 30, &count, &total);
+        remote = linyaps_remote_fetch_apps(keyword ? keyword : "", category_id, page, page_size, &count, &total);
     }
 
     LinyapsPackageInfo **list = NULL;
@@ -139,6 +143,49 @@ static void *fetch_remote_thread(void *arg)
     return NULL;
 }
 
+/* Helper: compute items_per_page from current window size */
+static int current_items_per_page(bool has_pagination)
+{
+    if (!g_store) return 30;
+
+    int reserve_h = 0;
+    if (g_store->active_nav == NAV_ALL ||
+        g_store->active_nav == NAV_RECOMMENDED ||
+        (g_store->active_nav >= NAV_CAT_OFFICE && g_store->active_nav <= NAV_CAT_GAMES)) {
+        reserve_h += CONTENT_HEADER_H;
+    }
+
+    /* Calculate grid spec directly using g_store instead of g_state */
+    const int gap = DS_SPACE_3;
+    int content_w = g_store->window_w - SIDEBAR_W - DS_SPACE_4 * 2;
+    int content_h = g_store->window_h - TITLEBAR_H - reserve_h - DS_SPACE_4 * 2;
+    if (has_pagination) content_h -= GRID_PAGE_H;  /* Reserve space for pagination buttons */
+    if (content_w < 1)       content_w = 1;
+    if (content_h < CARD_H)  content_h = CARD_H;
+
+    int max_fit_cols = (content_w + gap) / (GRID_MIN_CARD_W + gap);
+    if (max_fit_cols > GRID_MAX_COLS) max_fit_cols = GRID_MAX_COLS;
+    if (max_fit_cols < 1) max_fit_cols = 1;
+
+    int best_cols = 1;
+    for (int cols = 1; cols <= max_fit_cols; cols++) {
+        int w = (content_w - gap * (cols - 1)) / cols;
+        int score = abs(w - GRID_TARGET_CARD_W);
+        if (w > GRID_MAX_CARD_W) score += (w - GRID_MAX_CARD_W) * 2;
+        int best_w = (content_w - gap * (best_cols - 1)) / best_cols;
+        int best_score_val = abs(best_w - GRID_TARGET_CARD_W);
+        if (best_w > GRID_MAX_CARD_W) best_score_val += (best_w - GRID_MAX_CARD_W) * 2;
+        if (score < best_score_val) best_cols = cols;
+    }
+
+    int rows = (content_h + gap) / (CARD_H + gap);
+    if (rows > 12) rows = 12;
+    if (rows < 1) rows = 1;
+
+    int items = best_cols * rows;
+    return items > 0 ? items : 30;
+}
+
 static void start_remote_fetch(const char *keyword, const char *category_id, int page)
 {
     SDL_SetAtomicInt(&g_store->loading_remote, 1);
@@ -152,6 +199,7 @@ static void start_remote_fetch(const char *keyword, const char *category_id, int
     farg->keyword     = keyword ? strdup(keyword) : NULL;
     farg->category_id = category_id ? strdup(category_id) : NULL;
     farg->page = page;
+    farg->page_size = current_items_per_page(true);  /* Assume pagination for initial fetch */
 
     pthread_t tid;
     pthread_attr_t attr;

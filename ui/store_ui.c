@@ -107,11 +107,12 @@ static int clamp_int(int v, int min, int max)
     return v;
 }
 
-AppGridSpec app_grid_spec(int reserve_h)
+AppGridSpec app_grid_spec(int reserve_h, bool has_pagination)
 {
     const int gap = DS_SPACE_3;
     int content_w = g_state->window_w - SIDEBAR_W - DS_SPACE_4 * 2;
     int content_h = g_state->window_h - TITLEBAR_H - reserve_h - DS_SPACE_4 * 2;
+    if (has_pagination) content_h -= GRID_PAGE_H;  /* Reserve space for pagination buttons */
     if (content_w < 1)       content_w = 1;
     if (content_h < CARD_H)  content_h = CARD_H;
 
@@ -126,7 +127,7 @@ AppGridSpec app_grid_spec(int reserve_h)
         if (score < best_score) { best_score = score; best_cols = cols; best_w = w; }
     }
 
-    int rows_h = content_h - GRID_PAGE_H;
+    int rows_h = content_h;
     int rows = clamp_int((rows_h + gap) / (CARD_H + gap), 1, 12);
 
     return (AppGridSpec){
