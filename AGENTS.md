@@ -301,6 +301,37 @@ if (input.mouse_moved && (input.mx != prev_mx || input.my != prev_my)) {
 
 **效果**：鼠标静止时零 CPU 开销，只在位置变化时触发重布局。
 
+### 字形渲染优化：纹理图集
+
+**问题**：每个字形一次 Draw Call，一个文字命令如果有 20 个字，就是 20 次 draw call。
+
+**解决方案**：使用字形纹理图集（texture atlas），将所有字形合并到一张大纹理。
+
+```c
+// 旧代码：每个字形一次 draw call
+for (int q = 0; q < tb->quad_count; q++) {
+    SDL_BindGPUFragmentSamplers(rp, 0, ...);  // 每个字形换一次纹理
+    SDL_DrawGPUIndexedPrimitives(rp, 6, 1, ...);  // 每个字形一次绘制
+}
+
+// 新代码：使用纹理图集，只需 1 次 draw call
+if (tb->uses_atlas) {
+    SDL_BindGPUFragmentSamplers(rp, 0,
+        &(SDL_GPUTextureSamplerBinding){
+            .texture = GlyphAtlas_get_texture(&ctx->glyph_atlas),
+            .sampler = ctx->sampler_linear }, 1);
+    SDL_DrawGPUIndexedPrimitives(rp, 6 * tb->quad_count, 1, ...);
+}
+```
+
+**实现细节**：
+- 纹理图集大小：2048x2048 像素
+- 打包算法：Shelf（Next Fit Decreasing Height）
+- 自动计算 UV 坐标
+- 批量上传所有字形到 GPU
+
+**效果**：Draw Call 从 N 次/文字命令 → 1 次/文字命令，GPU 状态切换从 N 次 → 1 次。
+
 ---
 
 ## 构建
