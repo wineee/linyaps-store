@@ -19,6 +19,9 @@ void store_state_init(StoreState *s, LinyapsContext *ctx)
     /* 更新列表将在启动时通过真实 API 检查后填充 */
     s->update_count = 0;
     s->update_list = NULL;
+
+    /* 初始化已安装应用 ID 集合 */
+    id_set_init(&s->installed_id_set);
 }
 
 void store_state_free(StoreState *s)
@@ -30,6 +33,8 @@ void store_state_free(StoreState *s)
     s->search_results = NULL;
     s->installed_list = NULL;
     s->ranking_list   = NULL;
+
+    id_set_free(&s->installed_id_set);
 
     if (s->update_list) {
         for (size_t i = 0; i < s->update_count; i++) {

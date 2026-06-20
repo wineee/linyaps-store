@@ -206,15 +206,9 @@ void view_app_grid(void)
                 UI_ROW(ID_STATUS + 20 + row_idx * 2, DS_SPACE_3) {
                     int col = 0;
                     for (; col < spec.cols && i < end_idx; col++, i++) {
-                        bool inst = false;
-                        for (size_t k = 0; k < g_state->installed_count; k++) {
-                            LinyapsPackageInfo *ins = g_state->installed_list[k];
-                            if (ins && ins->id && list[i]->id &&
-                                strcmp(ins->id, list[i]->id) == 0) {
-                                inst = true;
-                                break;
-                            }
-                        }
+                        bool inst = (list[i]->id &&
+                                     id_set_contains(&g_state->installed_id_set,
+                                                     list[i]->id));
                         app_card((int)i, list[i], inst, spec.card_w);
                     }
                     for (; col < spec.cols; col++) {

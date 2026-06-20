@@ -863,6 +863,10 @@ int main(int argc, char *argv[])
         LOG_INFO("main", "已安装应用: count=%zu", store.installed_count);
         store.search_results = store.installed_list;
         store.search_count   = store.installed_count;
+
+        /* 构建已安装应用 ID 哈希表，加速后续查找 */
+        id_set_build_from_packages(&store.installed_id_set,
+                                   store.installed_list, store.installed_count);
     }
 
     LOG_INFO("main", "启动远端应用列表拉取...");

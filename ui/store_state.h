@@ -3,6 +3,7 @@
 #pragma once
 
 #include "../lib/linyaps_backend.h"
+#include "id_set.h"
 
 #include <SDL3/SDL.h>
 
@@ -114,6 +115,7 @@ typedef struct {
     long                 remote_total;    /* total count reported by API */
     LinyapsPackageInfo **installed_list;
     size_t               installed_count;
+    IdSet                installed_id_set; /* O(1) lookup for installed app IDs */
     SDL_AtomicInt        loading_remote;  /* 0 = idle, 1 = loading */
 
     /* updates */

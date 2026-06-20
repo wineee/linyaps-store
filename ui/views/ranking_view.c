@@ -259,14 +259,9 @@ void view_ranking(void)
                     UI_ROW(ID_STATUS + 600 + row_idx * 2, DS_SPACE_3) {
                         int col = 0;
                         for (; col < spec.cols && i < count; col++, i++) {
-                            bool inst = false;
-                            for (size_t k = 0; k < g_state->installed_count; k++) {
-                                LinyapsPackageInfo *ins = g_state->installed_list[k];
-                                if (ins && ins->id && g_state->ranking_list[i]->id &&
-                                    strcmp(ins->id, g_state->ranking_list[i]->id) == 0) {
-                                    inst = true; break;
-                                }
-                            }
+                            bool inst = (g_state->ranking_list[i]->id &&
+                                         id_set_contains(&g_state->installed_id_set,
+                                                         g_state->ranking_list[i]->id));
                             ranking_app_card((int)i, (int)(g_state->current_page * 30 + i + 1),
                                              g_state->ranking_list[i], inst, spec.card_w);
                         }

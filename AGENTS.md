@@ -45,6 +45,7 @@ linyaps-store/
 │   ├── main.c              # 事件循环入口
 │   ├── store_state.h/c     # 全局 UI 状态（StoreState）
 │   ├── store_ui.h/c        # Clay 布局 & 渲染逻辑
+│   ├── id_set.h/c          # 已安装应用 ID 哈希表（O(1) 查找）
 ├── tests/
 │   ├── cli_test.c          # 手动 CLI 验证工具
 │   └── test_backend.c      # 单元测试（CMake ctest）
@@ -217,6 +218,7 @@ typedef struct {
 
     LinyapsPackageInfo **search_results; size_t search_count;
     LinyapsPackageInfo **installed_list; size_t installed_count;
+    IdSet                installed_id_set; // O(1) 查找已安装应用 ID
 
     /* updates */
     StoreUpdateItem *update_list;
@@ -227,6 +229,38 @@ typedef struct {
     bool dark_mode;
     bool dirty;   // 脏标志驱动渲染，false 时跳过 CPU 重布局
 } StoreState;
+```
+
+### `IdSet`（`ui/id_set.h`）
+
+开放寻址哈希表，用于 O(1) 查找已安装应用 ID。使用 FNV-1a 哈希，负载因子上限 0.75。
+
+```c
+typedef struct IdSet {
+    char  **keys;     // NULL 表示空槽
+    size_t  capacity;
+    size_t  count;
+} IdSet;
+
+void id_set_init(IdSet *set);
+void id_set_free(IdSet *set);
+bool id_set_insert(IdSet *set, const char *key);
+bool id_set_contains(const IdSet *set, const char *key);
+void id_set_build_from_packages(IdSet *set, LinyapsPackageInfo **list, size_t count);
+```
+
+**使用场景**：在 `view_app_grid()` 和 `view_ranking()` 中，将原来的 O(n×m) 线性扫描替换为 O(1) 哈希查找：
+
+```c
+// 旧代码 (O(n×m)):
+for (size_t k = 0; k < g_state->installed_count; k++) {
+    if (strcmp(g_state->installed_list[k]->id, list[i]->id) == 0) {
+        inst = true; break;
+    }
+}
+
+// 新代码 (O(1)):
+bool inst = id_set_contains(&g_state->installed_id_set, list[i]->id);
 ```
 
 ### `store_ui.c`

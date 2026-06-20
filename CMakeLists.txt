@@ -37,6 +37,12 @@ add_executable(test_filter tests/test_filter.c)
 target_include_directories(test_filter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/lib)
 target_link_libraries(test_filter PRIVATE linyaps_store PkgConfig::SYSTEMD)
 
+add_executable(test_id_set tests/test_id_set.c ui/id_set.c)
+target_include_directories(test_id_set PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/ui)
+
+add_executable(test_perf_id_set tests/test_perf_id_set.c ui/id_set.c)
+target_include_directories(test_perf_id_set PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/ui)
+
 add_executable(linyaps_cli tests/cli_test.c)
 target_link_libraries(linyaps_cli PRIVATE linyaps_store)
 
@@ -44,11 +50,13 @@ enable_testing()
 add_test(NAME test_backend COMMAND test_backend)
 add_test(NAME test_util   COMMAND test_util)
 add_test(NAME test_filter COMMAND test_filter)
+add_test(NAME test_id_set COMMAND test_id_set)
+add_test(NAME test_perf_id_set COMMAND test_perf_id_set)
 
 # 一键编译+运行所有测试
 add_custom_target(run_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-    DEPENDS test_backend test_util test_filter
+    DEPENDS test_backend test_util test_filter test_id_set
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running all tests")
 
@@ -61,6 +69,7 @@ add_executable(linyaps_store_app
     ui/main.c
     ui/store_state.c
     ui/store_ui.c
+    ui/id_set.c
     ui/views/sidebar.c
     ui/views/titlebar.c
     ui/views/app_grid.c
