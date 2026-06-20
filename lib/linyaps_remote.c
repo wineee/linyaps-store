@@ -6,10 +6,141 @@
 #include <cJSON.h>
 #include <curl/curl.h>
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/utsname.h>
+
+/* ------------------------------------------------------------------ */
+/* CURL 连接池（线程安全）                                               */
+/*                                                                     */
+/* 复用 CURL handle 避免每次请求都创建/销毁，保留连接缓存、DNS 缓存、      */
+/* SSL 会话缓存，显著减少后续请求的延迟。                                 */
+/* ------------------------------------------------------------------ */
+
+#define CURL_POOL_SIZE 4  /* 最多缓存 4 个 CURL handle */
+
+typedef struct {
+    CURL             *handle;
+    struct curl_slist *headers;
+    bool              in_use;
+} CurlPoolEntry;
+
+static CurlPoolEntry g_curl_pool[CURL_POOL_SIZE];
+static pthread_mutex_t g_curl_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+static bool g_curl_pool_initialized = false;
+
+/* 初始化连接池 */
+static void curl_pool_init(void)
+{
+    if (g_curl_pool_initialized) return;
+    for (int i = 0; i < CURL_POOL_SIZE; i++) {
+        g_curl_pool[i].handle  = NULL;
+        g_curl_pool[i].headers = NULL;
+        g_curl_pool[i].in_use  = false;
+    }
+    g_curl_pool_initialized = true;
+}
+
+/* 从池中获取一个 CURL handle（带预配置的 headers） */
+static CURL *curl_pool_acquire(struct curl_slist **out_headers)
+{
+    pthread_mutex_lock(&g_curl_pool_mutex);
+    curl_pool_init();
+
+    /* 查找空闲的 handle */
+    for (int i = 0; i < CURL_POOL_SIZE; i++) {
+        if (!g_curl_pool[i].in_use) {
+            /* 如果 handle 不存在，创建一个 */
+            if (!g_curl_pool[i].handle) {
+                g_curl_pool[i].handle = curl_easy_init();
+                if (!g_curl_pool[i].handle) {
+                    pthread_mutex_unlock(&g_curl_pool_mutex);
+                    return NULL;
+                }
+                /* 预配置公共 headers */
+                g_curl_pool[i].headers = NULL;
+                g_curl_pool[i].headers = curl_slist_append(g_curl_pool[i].headers, "Content-Type: application/json");
+                g_curl_pool[i].headers = curl_slist_append(g_curl_pool[i].headers, "Accept: application/json");
+            }
+            g_curl_pool[i].in_use = true;
+            *out_headers = g_curl_pool[i].headers;
+            pthread_mutex_unlock(&g_curl_pool_mutex);
+
+            /* 重置 per-request 选项（保留连接缓存） */
+            CURL *curl = g_curl_pool[i].handle;
+            curl_easy_reset(curl);
+            return curl;
+        }
+    }
+
+    /* 池已满，创建临时 handle */
+    pthread_mutex_unlock(&g_curl_pool_mutex);
+    CURL *curl = curl_easy_init();
+    if (curl) {
+        *out_headers = NULL;
+        *out_headers = curl_slist_append(*out_headers, "Content-Type: application/json");
+        *out_headers = curl_slist_append(*out_headers, "Accept: application/json");
+    }
+    return curl;
+}
+
+/* 归还 CURL handle 到池中 */
+static void curl_pool_release(CURL *curl, struct curl_slist *headers, bool is_pooled)
+{
+    if (!curl) return;
+
+    if (is_pooled) {
+        pthread_mutex_lock(&g_curl_pool_mutex);
+        for (int i = 0; i < CURL_POOL_SIZE; i++) {
+            if (g_curl_pool[i].handle == curl) {
+                g_curl_pool[i].in_use = false;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&g_curl_pool_mutex);
+    } else {
+        /* 临时 handle，直接销毁 */
+        if (headers) curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+    }
+}
+
+/* 查找 handle 是否在池中（用于决定是否释放 headers） */
+static bool curl_pool_contains(CURL *curl)
+{
+    pthread_mutex_lock(&g_curl_pool_mutex);
+    for (int i = 0; i < CURL_POOL_SIZE; i++) {
+        if (g_curl_pool[i].handle == curl) {
+            pthread_mutex_unlock(&g_curl_pool_mutex);
+            return true;
+        }
+    }
+    pthread_mutex_unlock(&g_curl_pool_mutex);
+    return false;
+}
+
+/* 销毁连接池（程序退出时调用） */
+__attribute__((destructor))
+static void curl_pool_destroy(void)
+{
+    pthread_mutex_lock(&g_curl_pool_mutex);
+    for (int i = 0; i < CURL_POOL_SIZE; i++) {
+        if (g_curl_pool[i].handle) {
+            curl_easy_cleanup(g_curl_pool[i].handle);
+            g_curl_pool[i].handle = NULL;
+        }
+        if (g_curl_pool[i].headers) {
+            curl_slist_free_all(g_curl_pool[i].headers);
+            g_curl_pool[i].headers = NULL;
+        }
+        g_curl_pool[i].in_use = false;
+    }
+    g_curl_pool_initialized = false;
+    pthread_mutex_unlock(&g_curl_pool_mutex);
+    pthread_mutex_destroy(&g_curl_pool_mutex);
+}
 
 /* ------------------------------------------------------------------ */
 /* 内部：curl 写回调                                                    */
@@ -40,19 +171,20 @@ static size_t curl_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata
 }
 
 /* ------------------------------------------------------------------ */
-/* 内部：HTTP POST JSON                                                 */
+/* 内部：HTTP POST JSON（使用连接池）                                    */
 /* ------------------------------------------------------------------ */
 
 static char *http_post_json(const char *url, const char *body)
 {
-    CURL *curl = curl_easy_init();
+    struct curl_slist *hdrs = NULL;
+    bool is_pooled = false;
+    CURL *curl = curl_pool_acquire(&hdrs);
     if (!curl) return NULL;
 
-    CurlBuf resp = { NULL, 0, 0 };
+    /* 检查是否是池中的 handle */
+    is_pooled = curl_pool_contains(curl);
 
-    struct curl_slist *hdrs = NULL;
-    hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
-    hdrs = curl_slist_append(hdrs, "Accept: application/json");
+    CurlBuf resp = { NULL, 0, 0 };
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
@@ -70,8 +202,8 @@ static char *http_post_json(const char *url, const char *body)
         resp.buf = NULL;
     }
 
-    curl_slist_free_all(hdrs);
-    curl_easy_cleanup(curl);
+    /* 归还 handle 到池中（池中的 handle 不释放 headers） */
+    curl_pool_release(curl, hdrs, is_pooled);
     return resp.buf;
 }
 
