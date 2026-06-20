@@ -214,8 +214,10 @@ void view_app_grid(void)
     if (g_state->current_page < 0) g_state->current_page = 0;
 
     /* For server-side paging, the fetched data IS the current page (no sub-slicing) */
+    /* Limit display to items_per_page even if we have more cached data */
     size_t start_idx = 0;
     size_t end_idx = count;
+    if (end_idx > (size_t)items_per_page) end_idx = (size_t)items_per_page;
 
     CLAY(CLAY_SIDI(CLAY_STRING("AppGridRoot"), ID_STATUS + 9), {
         .layout = {
