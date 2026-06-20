@@ -346,7 +346,6 @@ static void *check_updates_real_thread(void *arg)
     size_t update_count = 0;
 
     if (remote && remote_count > 0) {
-        /* 构建已安装应用的 ID 到信息的映射 */
         updates = calloc(remote_count, sizeof(StoreUpdateItem));
         if (updates) {
             for (size_t i = 0; i < remote_count; i++) {

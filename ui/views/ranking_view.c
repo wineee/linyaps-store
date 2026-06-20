@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static const char *format_release_time(const char *create_time)
 {
@@ -12,7 +13,14 @@ static const char *format_release_time(const char *create_time)
     int y = 0, m = 0, d = 0;
     if (sscanf(create_time, "%d-%d-%d", &y, &m, &d) != 3) return "刚刚上架";
 
-    int cur_y = 2026, cur_m = 6, cur_d = 19;
+    /* 获取当前系统时间 */
+    time_t now = time(NULL);
+    struct tm *tm_now = localtime(&now);
+    int cur_y = tm_now->tm_year + 1900;
+    int cur_m = tm_now->tm_mon + 1;
+    int cur_d = tm_now->tm_mday;
+
+    /* 简化的天数计算（近似值足够用于显示） */
     int days = (cur_y - y) * 365 + (cur_m - m) * 30 + (cur_d - d);
     if (days < 0) days = 0;
 

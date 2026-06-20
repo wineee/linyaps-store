@@ -29,11 +29,28 @@ const char *store_ui_frame_str(const char *fmt, ...)
     va_start(args, fmt);
     char *dest = &g_string_arena[g_string_arena_offset];
     int remaining = (int)(sizeof(g_string_arena) - g_string_arena_offset);
-    if (remaining <= 0) { va_end(args); return ""; }
+    if (remaining <= 0) {
+        va_end(args);
+        static bool warned = false;
+        if (!warned) {
+            LOG_WARN("ui", "Frame string arena exhausted (%zu bytes). "
+                     "Consider increasing g_string_arena size.", sizeof(g_string_arena));
+            warned = true;
+        }
+        return "";
+    }
     int n = vsnprintf(dest, remaining, fmt, args);
     va_end(args);
     if (n < 0) return "";
-    g_string_arena_offset += n + 1;
+    if (n >= remaining) {
+        /* Truncated - log warning on first occurrence */
+        static bool trunc_warned = false;
+        if (!trunc_warned) {
+            LOG_WARN("ui", "Frame string truncated: needed %d bytes, had %d", n + 1, remaining);
+            trunc_warned = true;
+        }
+    }
+    g_string_arena_offset += (n < remaining ? n : remaining - 1) + 1;
     return dest;
 }
 
