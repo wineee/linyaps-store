@@ -369,6 +369,31 @@ case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
 
 **效果**：减少每帧不必要的系统调用，只在窗口大小实际变化时更新。
 
+### 字体大小缓存优化
+
+**问题**：`s_last_phys_size` 在每帧开头被重置为 0，导致每帧第一个文字命令必然触发一次字体大小设置（`TTF_SetFontSize` 有系统调用开销）。
+
+**解决方案**：移除每帧重置，让缓存保留上一帧的值。
+
+```c
+// 旧代码：每帧重置
+void KilnUI_render(...) {
+    s_last_phys_size = 0;  // ← 每帧重置
+    ...
+}
+
+// 新代码：保留上一帧的值
+void KilnUI_render(...) {
+    // 不重置 s_last_phys_size：让缓存保留上一帧的值
+    // measure_text_cb 在布局阶段使用逻辑像素大小，
+    // build_text_batch 使用物理像素大小，两者不同
+    // set_font_size 会在需要时自动更新
+    ...
+}
+```
+
+**效果**：减少每帧不必要的 `TTF_SetFontSize` 调用，提升渲染性能。
+
 ---
 
 ## 构建
