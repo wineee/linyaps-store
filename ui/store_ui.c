@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/store_ui.c — linyaps-store UI layout (KilnUI / Clay)
  *
  * Top-level orchestrator: frame-string arena, common helpers,

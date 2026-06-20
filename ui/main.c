@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #include "store_state.h"
 #include "store_ui.h"
 #include "id_map.h"

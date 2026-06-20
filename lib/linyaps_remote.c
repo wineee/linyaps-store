@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 
 #include "linyaps_remote.h"
 #include "linyaps_log.h"

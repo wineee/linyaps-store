@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* tests/test_perf_id_set.c — Performance comparison for IdSet vs linear scan */
 
 #include "../ui/id_set.h"

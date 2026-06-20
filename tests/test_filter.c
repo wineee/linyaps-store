@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 
 /*
  * test_filter.c — Unit tests for filter_store_search_results / compare_versions.

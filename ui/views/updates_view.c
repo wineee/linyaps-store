@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/views/updates_view.c — Updates page */
 
 #include "views_internal.h"

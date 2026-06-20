@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-3.0-or-later
+/* SPDX-License-Identifier: MIT
  *
  * linyaps_remote.h — 远端商店 API 客户端
  *

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 
 /*
  * test_util.c — Unit tests for public utility / memory-management APIs.

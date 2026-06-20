@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/store_state.h — linyaps-store application state */
 
 #pragma once

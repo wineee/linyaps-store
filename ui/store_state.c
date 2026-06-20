@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/store_state.c — StoreState lifecycle */
 
 #include "store_state.h"

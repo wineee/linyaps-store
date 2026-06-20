@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/views/ranking_view.c — Ranking page with tabs & pagination */
 
 #include "views_internal.h"

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/id_set.c — Open-addressing hash set for app IDs */
 
 #include "id_set.h"

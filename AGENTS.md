@@ -318,7 +318,7 @@ ctest --test-dir build
 - **语言标准**：全部 C23（`-std=c23`）
 - **代码格式**：`kilnui/.clang-format`（SDL 风格），后端同风格
 - **警告**：`-Wall -Wextra -Wno-unused-parameter`
-- **许可证**：后端 LGPL-3.0-or-later，KilnUI MIT
+- **许可证**：MIT（`3rdparty/` 第三方库保留原许可证）
 - **内存**：后端无 GC，所有 `LinyapsPackageInfo` 必须调用对应的 `_free` 函数释放
 - **线程**：单线程，KilnUI 和后端均不是线程安全的
 

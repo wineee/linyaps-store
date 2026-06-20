@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/views/titlebar.c — Top bar with logo, search, theme toggle */
 
 #include "views_internal.h"

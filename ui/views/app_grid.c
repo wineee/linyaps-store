@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/views/app_grid.c — App card grid with pagination */
 
 #include "views_internal.h"

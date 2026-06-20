@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* tests/test_id_set.c — Unit tests for IdSet */
 
 #include "../ui/id_set.h"

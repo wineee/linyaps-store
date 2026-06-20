@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/views/views_internal.h — Shared state & helpers for store views
  *
  * This header is internal to the UI layer — not part of the public API.

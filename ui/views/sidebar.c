@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/views/sidebar.c — Sidebar navigation */
 
 #include "views_internal.h"

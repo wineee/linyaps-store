@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/id_map.h — Open-addressing hash map for app ID -> version mapping */
 
 #pragma once

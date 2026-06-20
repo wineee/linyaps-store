@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 
 #define _POSIX_C_SOURCE 200809L
 

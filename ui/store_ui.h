@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* ui/store_ui.h — Public interface for store_ui.c */
 
 #pragma once
