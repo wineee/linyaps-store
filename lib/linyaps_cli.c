@@ -83,26 +83,96 @@ static char *run_command_capture(const char *cmd)
 }
 
 /* ------------------------------------------------------------------ */
-/* linyaps_list_installed                                               */
+/* 文件读取辅助                                                         */
 /* ------------------------------------------------------------------ */
+
+/**
+ * 读取整个文件到内存。返回的字符串需要 free()。
+ * 失败时返回 NULL。
+ */
+static char *read_file_contents(const char *path)
+{
+    FILE *fp = fopen(path, "r");
+    if (!fp) return NULL;
+
+    /* 获取文件大小 */
+    fseek(fp, 0, SEEK_END);
+    long file_size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (file_size <= 0) { fclose(fp); return NULL; }
+
+    char *buf = malloc((size_t)file_size + 1);
+    if (!buf) { fclose(fp); return NULL; }
+
+    size_t nread = fread(buf, 1, (size_t)file_size, fp);
+    fclose(fp);
+    buf[nread] = '\0';
+    return buf;
+}
+
+/* ------------------------------------------------------------------ */
+/* linyaps_list_installed                                               */
+/*                                                                     */
+/* 直接读取 /var/lib/linglong/states.json 避免 subprocess 开销。        */
+/* ------------------------------------------------------------------ */
+
+#define LINGLONG_STATES_FILE "/var/lib/linglong/states.json"
 
 LinyapsPackageInfo **linyaps_list_installed(LinyapsContext *ctx, size_t *out_count)
 {
     (void)ctx;
     if (out_count) *out_count = 0;
-    char *buf = run_command_capture("ll-cli list --json");
-    if (!buf) return NULL;
+
+    /* 直接读取 states.json，避免 ll-cli subprocess 开销 */
+    char *buf = read_file_contents(LINGLONG_STATES_FILE);
+    if (!buf) {
+        /* fallback: 尝试 ll-cli */
+        buf = run_command_capture("ll-cli list --json");
+        if (!buf) return NULL;
+    }
+
     cJSON *root = cJSON_Parse(buf);
     free(buf);
-    if (!cJSON_IsArray(root)) { cJSON_Delete(root); return NULL; }
+    if (!root) return NULL;
+
+    /* states.json 格式: { "layers": [ { "info": {...}, "repo": "..." }, ... ] } */
+    const cJSON *layers = cJSON_GetObjectItemCaseSensitive(root, "layers");
+    if (!cJSON_IsArray(layers)) {
+        /* 兼容旧格式: 直接是数组 (ll-cli list --json 输出) */
+        if (cJSON_IsArray(root)) {
+            layers = root;
+        } else {
+            cJSON_Delete(root);
+            return NULL;
+        }
+    }
+
     LinyapsPackageInfo **items = NULL;
     size_t count = 0, cap = 0;
-    const cJSON *obj = NULL;
-    cJSON_ArrayForEach(obj, root) {
-        if (cJSON_IsObject(obj)) {
-            LinyapsPackageInfo *info = package_info_from_json_object(obj, "local");
-            if (info) package_list_append(&items, &count, &cap, info);
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, layers) {
+        /* states.json 中每个 item 有 "info" 和 "repo" 字段 */
+        const cJSON *info_obj = cJSON_GetObjectItemCaseSensitive(item, "info");
+        const cJSON *repo_obj = cJSON_GetObjectItemCaseSensitive(item, "repo");
+
+        /* 如果没有 "info" 字段，可能是旧格式，直接使用 item */
+        if (!info_obj || !cJSON_IsObject(info_obj)) {
+            info_obj = item;
         }
+
+        /* 只返回 kind=app 的应用（与 ll-cli 行为一致） */
+        const cJSON *kind = cJSON_GetObjectItemCaseSensitive(info_obj, "kind");
+        if (cJSON_IsString(kind) && strcmp(kind->valuestring, "app") != 0) {
+            continue;  /* 跳过 runtime/base 等非应用类型 */
+        }
+
+        const char *repo = "local";
+        if (cJSON_IsString(repo_obj)) {
+            repo = repo_obj->valuestring;
+        }
+
+        LinyapsPackageInfo *info = package_info_from_json_object(info_obj, repo);
+        if (info) package_list_append(&items, &count, &cap, info);
     }
     cJSON_Delete(root);
     if (out_count) *out_count = count;
