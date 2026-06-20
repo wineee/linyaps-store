@@ -71,7 +71,7 @@ linyaps-store/
 │   ├── linyaps_types.h     # Data structures
 │   ├── linyaps_context.c   # D-Bus connection & event dispatch
 │   ├── linyaps_remote.c    # Remote store HTTP API
-│   └── linyaps_cli.c       # ll-cli command wrapper
+│   └── linyaps_local.c     # local installed app reader (states.json)
 ├── ui/                     # GUI application
 │   ├── main.c              # Event loop entry point
 │   ├── store_state.h/c     # Global application state

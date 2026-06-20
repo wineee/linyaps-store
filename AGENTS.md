@@ -40,7 +40,7 @@ linyaps-store/
 │   ├── linyaps_dbus_msg.c  # 请求/响应解析（a{sv}）
 │   ├── linyaps_task.c      # 任务跟踪 & 进度回调
 │   ├── linyaps_util.c      # 字符串工具
-│   └── linyaps_cli.c       # CLI 辅助（ll-cli fallback）
+│   └── linyaps_local.c     # 本地已安装应用读取（states.json + ll-cli fallback）
 ├── ui/                     # GUI 应用层
 │   ├── main.c              # 事件循环入口
 │   ├── store_state.h/c     # 全局 UI 状态（StoreState）
