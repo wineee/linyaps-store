@@ -332,6 +332,43 @@ if (tb->uses_atlas) {
 
 **效果**：Draw Call 从 N 次/文字命令 → 1 次/文字命令，GPU 状态切换从 N 次 → 1 次。
 
+### 窗口大小轮询优化
+
+**问题**：每帧都调用 `SDL_GetWindowSizeInPixels` 检测窗口大小变化，这是不必要的轮询。
+
+**解决方案**：改为事件驱动，只在 `SDL_EVENT_WINDOW_RESIZED` 和 `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED` 事件中更新窗口大小。
+
+```c
+// 旧代码：每帧轮询
+int pixel_w = 0, pixel_h = 0;
+SDL_GetWindowSizeInPixels(ctx.window, &pixel_w, &pixel_h);
+int window_w = (int)((float)pixel_w / ctx.dpi_scale);
+int window_h = (int)((float)pixel_h / ctx.dpi_scale);
+if (window_w != store.window_w || window_h != store.window_h) {
+    store.window_w = window_w;
+    store.window_h = window_h;
+    SDL_SetAtomicInt(&store.dirty, 1);
+}
+
+// 新代码：事件驱动
+case SDL_EVENT_WINDOW_RESIZED:
+case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+    {
+        int pixel_w = 0, pixel_h = 0;
+        SDL_GetWindowSizeInPixels(ui->window, &pixel_w, &pixel_h);
+        int window_w = (int)((float)pixel_w / ui->dpi_scale);
+        int window_h = (int)((float)pixel_h / ui->dpi_scale);
+        if (window_w != store->window_w || window_h != store->window_h) {
+            store->window_w = window_w;
+            store->window_h = window_h;
+            SDL_SetAtomicInt(&store->dirty, 1);
+        }
+    }
+    break;
+```
+
+**效果**：减少每帧不必要的系统调用，只在窗口大小实际变化时更新。
+
 ---
 
 ## 构建
