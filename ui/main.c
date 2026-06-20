@@ -917,20 +917,12 @@ static bool handle_sdl_event(StoreState *store, KilnUI *ui,
                 int old_page_size = store->last_page_size;
                 int cached_count = store->last_page_data_count;
 
-                LOG_DEBUG("event", "Page size check: old=%d new=%d cached=%d",
-                          old_page_size, new_page_size, cached_count);
-
                 /* Only re-fetch if window got bigger and we don't have enough cached data */
                 bool need_refetch = false;
                 if (new_page_size > old_page_size && cached_count < new_page_size) {
-                    LOG_DEBUG("event", "Window enlarged, need more data (have %d, need %d)",
-                              cached_count, new_page_size);
                     need_refetch = true;
-                } else if (new_page_size < old_page_size) {
-                    LOG_DEBUG("event", "Window shrunk, using cached data (have %d, need %d)",
-                              cached_count, new_page_size);
-                    /* No re-fetch needed, will display fewer items */
                 }
+                /* If window shrunk or we have enough cached data, skip re-fetch */
 
                 if (need_refetch) {
                     int loading = SDL_GetAtomicInt(&store->loading_remote);
