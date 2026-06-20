@@ -200,6 +200,7 @@ static void start_remote_fetch(const char *keyword, const char *category_id, int
     farg->category_id = category_id ? strdup(category_id) : NULL;
     farg->page = page;
     farg->page_size = current_items_per_page(true);  /* Assume pagination for initial fetch */
+    g_store->last_page_size = farg->page_size;  /* Track for cache optimization */
 
     pthread_t tid;
     pthread_attr_t attr;
@@ -718,6 +719,7 @@ static bool handle_user_event(StoreState *store, const SDL_Event *e)
                 store->search_results = res->list;
                 store->search_count   = res->count;
                 store->remote_total   = res->total;
+                store->last_page_data_count = (int)res->count;  /* Cache the data count */
                 if (res->is_search) {
                     store->is_searching = true;
                     strncpy(store->last_search_keyword, data_str, sizeof(store->last_search_keyword) - 1);
@@ -910,22 +912,43 @@ static bool handle_sdl_event(StoreState *store, KilnUI *ui,
                 store->window_h = window_h;
                 SDL_SetAtomicInt(&store->dirty, 1);
 
-                /* Re-fetch data with new page size based on new window dimensions */
-                int loading = SDL_GetAtomicInt(&store->loading_remote);
-                if (!loading) {
-                    if (store->is_searching) {
-                        start_remote_fetch(store->search_buf, NULL, 1);
-                    } else if (store->active_nav == NAV_RECOMMENDED ||
-                               store->active_nav == NAV_ALL ||
-                               (store->active_nav >= NAV_CAT_OFFICE && store->active_nav <= NAV_CAT_GAMES)) {
-                        const char *cat = current_remote_category();
-                        if (cat) {
-                            start_remote_fetch(NULL, cat, store->current_page + 1);
+                /* Check if we need to re-fetch based on page size change */
+                int new_page_size = current_items_per_page(true);
+                int old_page_size = store->last_page_size;
+                int cached_count = store->last_page_data_count;
+
+                LOG_DEBUG("event", "Page size check: old=%d new=%d cached=%d",
+                          old_page_size, new_page_size, cached_count);
+
+                /* Only re-fetch if window got bigger and we don't have enough cached data */
+                bool need_refetch = false;
+                if (new_page_size > old_page_size && cached_count < new_page_size) {
+                    LOG_DEBUG("event", "Window enlarged, need more data (have %d, need %d)",
+                              cached_count, new_page_size);
+                    need_refetch = true;
+                } else if (new_page_size < old_page_size) {
+                    LOG_DEBUG("event", "Window shrunk, using cached data (have %d, need %d)",
+                              cached_count, new_page_size);
+                    /* No re-fetch needed, will display fewer items */
+                }
+
+                if (need_refetch) {
+                    int loading = SDL_GetAtomicInt(&store->loading_remote);
+                    if (!loading) {
+                        if (store->is_searching) {
+                            start_remote_fetch(store->search_buf, NULL, 1);
+                        } else if (store->active_nav == NAV_RECOMMENDED ||
+                                   store->active_nav == NAV_ALL ||
+                                   (store->active_nav >= NAV_CAT_OFFICE && store->active_nav <= NAV_CAT_GAMES)) {
+                            const char *cat = current_remote_category();
+                            if (cat) {
+                                start_remote_fetch(NULL, cat, store->current_page + 1);
+                            }
                         }
+                    } else {
+                        /* Defer re-fetch until current load completes */
+                        store->need_refetch_on_load_complete = true;
                     }
-                } else {
-                    /* Defer re-fetch until current load completes */
-                    store->need_refetch_on_load_complete = true;
                 }
             }
         }

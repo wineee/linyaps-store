@@ -120,6 +120,10 @@ typedef struct {
     SDL_AtomicInt        loading_remote;  /* 0 = idle, 1 = loading */
     bool                 need_refetch_on_load_complete;  /* true if window resized during load */
 
+    /* page size tracking for cache optimization */
+    int                  last_page_size;  /* page_size used in last request */
+    int                  last_page_data_count;  /* actual data count received for current page */
+
     /* updates */
     StoreUpdateItem *update_list;
     size_t           update_count;
