@@ -292,6 +292,8 @@ void view_ranking(void)
                     .clip = { .vertical = true },
                 }) {
                     size_t i = 0, count = g_state->ranking_count;
+                    /* Limit display to items_per_page even if we have more cached data */
+                    if (count > (size_t)spec.items_per_page) count = (size_t)spec.items_per_page;
                     int row_idx = 0;
                     while (i < count) {
                         UI_ROW(ID_STATUS + 600 + row_idx * 2, DS_SPACE_3) {
@@ -300,7 +302,7 @@ void view_ranking(void)
                                 bool inst = (g_state->ranking_list[i]->id &&
                                              id_set_contains(&g_state->installed_id_set,
                                                              g_state->ranking_list[i]->id));
-                                ranking_app_card((int)i, (int)(g_state->current_page * 30 + i + 1),
+                                ranking_app_card((int)i, (int)(g_state->current_page * spec.items_per_page + i + 1),
                                                  g_state->ranking_list[i], inst, spec.card_w);
                             }
                             for (; col < spec.cols; col++) {

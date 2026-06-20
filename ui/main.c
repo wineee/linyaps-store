@@ -227,13 +227,16 @@ static void *fetch_ranking_thread(void *arg)
     int page = (val >> 8) & 0xFFFF;
     if (page == 0) page = 1;
 
+    /* Use dynamic page size based on window dimensions */
+    int page_size = current_items_per_page(true);
+
     size_t count = 0;
     long   total = 0;
     LinyapsRankingType rtype = (tab_type == 0)
         ? LINYAPS_RANKING_NEWEST : LINYAPS_RANKING_DOWNLOADS;
 
     LinyapsRemoteAppInfo **remote = linyaps_remote_fetch_ranking(
-        rtype, page, 30, &count, &total);
+        rtype, page, page_size, &count, &total);
 
     LinyapsPackageInfo **list = NULL;
     if (remote && count > 0) {
