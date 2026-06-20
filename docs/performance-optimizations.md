@@ -237,6 +237,46 @@ void KilnUI_render(...) {
 
 ---
 
+## 6. 字形缓存 Transfer Buffer 优化
+
+**提交哈希**：`04371fb`（kilnui 子模块）
+
+### 问题
+
+每次 `GlyphCache_flush_uploads` 都创建新的 Transfer Buffer，导致频繁分配/释放。
+
+```c
+// 旧代码：每次 flush 都创建新 buffer
+SDL_GPUTransferBuffer *tbuf = SDL_CreateGPUTransferBuffer(gc->gpu, ...);
+// ... 使用 ...
+SDL_ReleaseGPUTransferBuffer(gc->gpu, tbuf);
+```
+
+### 解决方案
+
+使用 grow-only 持久缓冲区，避免每帧分配/释放。
+
+```c
+// 新代码：复用持久缓冲区
+ensure_staging_buffer(gc, total);  // 按需扩容
+uint8_t *mapped = (uint8_t *)SDL_MapGPUTransferBuffer(gc->gpu, gc->staging_tbuf, false);
+// ... 使用 ...
+// 不释放，留待下次复用
+```
+
+### 效果
+
+- 减少每帧 GPU 资源分配/释放开销
+- 缓冲区按需增长，避免频繁重新分配
+- 与渲染器的持久缓冲区策略一致
+
+### 相关文件
+
+- `kilnui/src/glyph_cache.h/c` — 字形缓存
+- `kilnui/src/glyph_cache_atlas.h/c` — 纹理图集
+
+---
+
 ## 总结
 
 | 优化 | 提交哈希 | 效果 |
@@ -246,3 +286,4 @@ void KilnUI_render(...) {
 | 字形纹理图集 | `cbadaa7` | Draw Call N → 1 |
 | 窗口大小轮询 | `f9fb53e` | 事件驱动替代轮询 |
 | 字体大小缓存 | `2a6a819` | 跨帧缓存 TTF_SetFontSize |
+| 字形缓存 Transfer Buffer | `04371fb` | 持久缓冲区替代每帧分配 |
