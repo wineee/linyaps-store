@@ -831,6 +831,23 @@ static bool handle_sdl_event(StoreState *store, KilnUI *ui,
         SDL_SetAtomicInt(&store->dirty, 1);
         break;
 
+    case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        /* 窗口大小变化：更新 store 中的窗口尺寸
+         * KilnUI_handle_event 已经更新了 dpi_scale 和 mouse_scale */
+        {
+            int pixel_w = 0, pixel_h = 0;
+            SDL_GetWindowSizeInPixels(ui->window, &pixel_w, &pixel_h);
+            int window_w = (int)((float)pixel_w / ui->dpi_scale);
+            int window_h = (int)((float)pixel_h / ui->dpi_scale);
+            if (window_w != store->window_w || window_h != store->window_h) {
+                store->window_w = window_w;
+                store->window_h = window_h;
+                SDL_SetAtomicInt(&store->dirty, 1);
+            }
+        }
+        break;
+
     default:
         break;
     }
@@ -933,17 +950,6 @@ int main(int argc, char *argv[])
         if (lctx) {
             int r = linyaps_process(lctx);
             if (r > 0) SDL_SetAtomicInt(&store.dirty, 1);
-        }
-
-        /* Window resize detection */
-        int pixel_w = 0, pixel_h = 0;
-        SDL_GetWindowSizeInPixels(ctx.window, &pixel_w, &pixel_h);
-        int window_w = (int)((float)pixel_w / ctx.dpi_scale);
-        int window_h = (int)((float)pixel_h / ctx.dpi_scale);
-        if (window_w != store.window_w || window_h != store.window_h) {
-            store.window_w = window_w;
-            store.window_h = window_h;
-            SDL_SetAtomicInt(&store.dirty, 1);
         }
 
         /* Render */
