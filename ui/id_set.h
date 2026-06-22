@@ -13,9 +13,9 @@ extern "C" {
 /* A minimal open-addressing hash set for C strings (app IDs).
  * Uses linear probing with a load factor cap of 0.75. */
 typedef struct IdSet {
-    char  **keys;     /* NULL means empty slot */
-    size_t  capacity;
-    size_t  count;
+  char **keys; /* NULL means empty slot */
+  size_t capacity;
+  size_t count;
 } IdSet;
 
 /* Initialize an empty set. */
@@ -35,8 +35,7 @@ bool id_set_contains(const IdSet *set, const char *key);
 
 /* Build a set from an array of LinyapsPackageInfo. */
 #include "../lib/linyaps_types.h"
-void id_set_build_from_packages(IdSet *set,
-                                LinyapsPackageInfo **list,
+void id_set_build_from_packages(IdSet *set, LinyapsPackageInfo **list,
                                 size_t count);
 
 #ifdef __cplusplus

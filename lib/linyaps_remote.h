@@ -16,8 +16,8 @@
 
 #include "linyaps_types.h"
 
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,7 +27,7 @@ extern "C" {
 /* 配置                                                                 */
 /* ------------------------------------------------------------------ */
 
-#define LINYAPS_REMOTE_BASE_URL  "https://storeapi.linyaps.org.cn"
+#define LINYAPS_REMOTE_BASE_URL "https://storeapi.linyaps.org.cn"
 #define LINYAPS_REMOTE_REPO_NAME "stable"
 #define LINYAPS_REMOTE_PAGE_SIZE 30
 #define LINYAPS_REMOTE_TIMEOUT_SEC 15L
@@ -37,19 +37,19 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 
 typedef struct LinyapsRemoteAppInfo {
-    /* 复用基础结构（id/name/version/arch/channel/repo/description/kind/size） */
-    LinyapsPackageInfo base;
+  /* 复用基础结构（id/name/version/arch/channel/repo/description/kind/size） */
+  LinyapsPackageInfo base;
 
-    /* 远端额外字段 */
-    char *icon_url;       /* CDN 图标 URL，可能为 NULL */
-    char *zh_name;        /* 中文名 */
-    char *category_id;    /* 分类 ID，如 "01" */
-    char *category_name;  /* 分类名，如 "网络应用" */
+  /* 远端额外字段 */
+  char *icon_url;      /* CDN 图标 URL，可能为 NULL */
+  char *zh_name;       /* 中文名 */
+  char *category_id;   /* 分类 ID，如 "01" */
+  char *category_name; /* 分类名，如 "网络应用" */
 } LinyapsRemoteAppInfo;
 
 typedef enum {
-    LINYAPS_RANKING_NEWEST = 0,
-    LINYAPS_RANKING_DOWNLOADS,
+  LINYAPS_RANKING_NEWEST = 0,
+  LINYAPS_RANKING_DOWNLOADS,
 } LinyapsRankingType;
 
 /* ------------------------------------------------------------------ */
@@ -69,32 +69,27 @@ typedef enum {
  * 返回：堆分配的 LinyapsRemoteAppInfo* 数组，调用方负责释放。
  *       失败返回 NULL，*out_count == 0。
  */
-LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(
-    const char *keyword,
-    const char *category_id,
-    int page,
-    int page_size,
-    size_t *out_count,
-    long   *out_total);
+LinyapsRemoteAppInfo **linyaps_remote_fetch_apps(const char *keyword,
+                                                 const char *category_id,
+                                                 int page, int page_size,
+                                                 size_t *out_count,
+                                                 long *out_total);
 
 /**
  * linyaps_remote_fetch_welcome_apps — 拉取推荐应用列表
  */
-LinyapsRemoteAppInfo **linyaps_remote_fetch_welcome_apps(
-    int page,
-    int page_size,
-    size_t *out_count,
-    long   *out_total);
+LinyapsRemoteAppInfo **linyaps_remote_fetch_welcome_apps(int page,
+                                                         int page_size,
+                                                         size_t *out_count,
+                                                         long *out_total);
 
 /**
  * linyaps_remote_fetch_ranking — 拉取排行列表
  */
-LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(
-    LinyapsRankingType type,
-    int                page,
-    int                page_size,
-    size_t            *out_count,
-    long              *out_total);
+LinyapsRemoteAppInfo **linyaps_remote_fetch_ranking(LinyapsRankingType type,
+                                                    int page, int page_size,
+                                                    size_t *out_count,
+                                                    long *out_total);
 
 /**
  * linyaps_remote_app_info_free — 释放单个 LinyapsRemoteAppInfo
@@ -104,14 +99,16 @@ void linyaps_remote_app_info_free(LinyapsRemoteAppInfo *info);
 /**
  * linyaps_remote_app_info_list_free — 释放数组
  */
-void linyaps_remote_app_info_list_free(LinyapsRemoteAppInfo **list, size_t count);
+void linyaps_remote_app_info_list_free(LinyapsRemoteAppInfo **list,
+                                       size_t count);
 
 /**
  * linyaps_remote_app_info_to_package_info — 浅拷贝为 LinyapsPackageInfo
  *
  * 返回的结构体独立持有字符串，需用 linyaps_package_info_free 释放。
  */
-LinyapsPackageInfo *linyaps_remote_app_info_to_package_info(const LinyapsRemoteAppInfo *info);
+LinyapsPackageInfo *
+linyaps_remote_app_info_to_package_info(const LinyapsRemoteAppInfo *info);
 
 /**
  * linyaps_remote_check_updates — 批量检查应用更新
@@ -123,10 +120,9 @@ LinyapsPackageInfo *linyaps_remote_app_info_to_package_info(const LinyapsRemoteA
  * 调用 POST /app/appCheckUpdate 接口，返回有更新的应用列表。
  * 返回的列表需要用 linyaps_remote_app_info_list_free 释放。
  */
-LinyapsRemoteAppInfo **linyaps_remote_check_updates(
-    const LinyapsPackageInfo **installed_apps,
-    size_t                    installed_count,
-    size_t                   *out_count);
+LinyapsRemoteAppInfo **
+linyaps_remote_check_updates(const LinyapsPackageInfo **installed_apps,
+                             size_t installed_count, size_t *out_count);
 
 #ifdef __cplusplus
 }

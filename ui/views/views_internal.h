@@ -23,29 +23,29 @@
 /* ID ranges (non-overlapping per widget group)                        */
 /* ------------------------------------------------------------------ */
 
-#define ID_ROOT           1000000
-#define ID_TITLEBAR       1001000
-#define ID_SIDEBAR        1002000
-#define ID_CAT_BAR        1003000
-#define ID_CARD_BASE      1004000
-#define ID_SEARCH         1005000
-#define ID_STATUS         1006000
-#define ID_THEME_TOGGLE   (ID_TITLEBAR + 11)
+#define ID_ROOT 1000000
+#define ID_TITLEBAR 1001000
+#define ID_SIDEBAR 1002000
+#define ID_CAT_BAR 1003000
+#define ID_CARD_BASE 1004000
+#define ID_SEARCH 1005000
+#define ID_STATUS 1006000
+#define ID_THEME_TOGGLE (ID_TITLEBAR + 11)
 
 /* ------------------------------------------------------------------ */
 /* Layout constants                                                    */
 /* ------------------------------------------------------------------ */
 
-#define SIDEBAR_W         180
-#define CARD_H            88
-#define ICON_PLACEHOLDER  48
-#define GRID_MIN_CARD_W   320
+#define SIDEBAR_W 180
+#define CARD_H 88
+#define ICON_PLACEHOLDER 48
+#define GRID_MIN_CARD_W 320
 #define GRID_TARGET_CARD_W 380
-#define GRID_MAX_CARD_W   480
-#define GRID_MAX_COLS     6
-#define TITLEBAR_H        52
-#define CONTENT_HEADER_H  44
-#define GRID_PAGE_H       40
+#define GRID_MAX_CARD_W 480
+#define GRID_MAX_COLS 6
+#define TITLEBAR_H 52
+#define CONTENT_HEADER_H 44
+#define GRID_PAGE_H 40
 
 /* ------------------------------------------------------------------ */
 /* Global state (defined in store_ui.c)                                */
@@ -62,7 +62,7 @@ extern StoreState *g_state;
 /* ------------------------------------------------------------------ */
 
 const char *store_ui_frame_str(const char *fmt, ...);
-void        store_ui_reset_frame_str_arena(void);
+void store_ui_reset_frame_str_arena(void);
 
 /* ------------------------------------------------------------------ */
 /* Helpers (defined in store_ui.c)                                     */
@@ -73,10 +73,10 @@ void launch_app(const char *app_id);
 
 /* Adaptive grid layout calculation */
 typedef struct {
-    int cols;
-    int rows;
-    int card_w;
-    int items_per_page;
+  int cols;
+  int rows;
+  int card_w;
+  int items_per_page;
 } AppGridSpec;
 
 AppGridSpec app_grid_spec(int reserve_h, bool has_pagination);

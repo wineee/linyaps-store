@@ -16,27 +16,20 @@
 /* ------------------------------------------------------------------ */
 
 typedef enum {
-    NAV_RECOMMENDED = 0,
-    NAV_ALL,
-    NAV_RANKING,
-    NAV_UPDATES,
-    /* --- category group --- */
-    NAV_CAT_OFFICE,
-    NAV_CAT_SYSTEM,
-    NAV_CAT_DEV,
-    NAV_CAT_GAMES,
-    NAV_COUNT,
+  NAV_RECOMMENDED = 0,
+  NAV_ALL,
+  NAV_RANKING,
+  NAV_UPDATES,
+  /* --- category group --- */
+  NAV_CAT_OFFICE,
+  NAV_CAT_SYSTEM,
+  NAV_CAT_DEV,
+  NAV_CAT_GAMES,
+  NAV_COUNT,
 } NavItem;
 
 static const char *const NAV_LABELS[NAV_COUNT] = {
-    "推荐",
-    "全部",
-    "排行",
-    "更新",
-    "办公",
-    "系统",
-    "开发",
-    "娱乐",
+    "推荐", "全部", "排行", "更新", "办公", "系统", "开发", "娱乐",
 };
 
 /* ------------------------------------------------------------------ */
@@ -44,30 +37,22 @@ static const char *const NAV_LABELS[NAV_COUNT] = {
 /* ------------------------------------------------------------------ */
 
 typedef enum {
-    CAT_ALL = 0,
-    CAT_NETWORK,
-    CAT_SOCIAL,
-    CAT_DEV,
-    CAT_VIDEO,
-    CAT_EDU,
-    CAT_GAMES,
-    CAT_OFFICE,
-    CAT_SYSTEM,
-    CAT_LIFESTYLE,
-    CAT_COUNT,
+  CAT_ALL = 0,
+  CAT_NETWORK,
+  CAT_SOCIAL,
+  CAT_DEV,
+  CAT_VIDEO,
+  CAT_EDU,
+  CAT_GAMES,
+  CAT_OFFICE,
+  CAT_SYSTEM,
+  CAT_LIFESTYLE,
+  CAT_COUNT,
 } CategoryTab;
 
 static const char *const CAT_LABELS[CAT_COUNT] = {
-    "全部",
-    "网络应用",
-    "社交通讯",
-    "编程开发",
-    "视频播放",
-    "教育学习",
-    "游戏娱乐",
-    "效率办公",
-    "系统工具",
-    "便捷生活",
+    "全部",     "网络应用", "社交通讯", "编程开发", "视频播放",
+    "教育学习", "游戏娱乐", "效率办公", "系统工具", "便捷生活",
 };
 
 /* ------------------------------------------------------------------ */
@@ -75,21 +60,21 @@ static const char *const CAT_LABELS[CAT_COUNT] = {
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-    const LinyapsPackageInfo *info;
-    bool installed;          /* true → show "打开", false → show "安装" */
-    float install_progress;  /* 0.0 when idle, 0–1 while installing     */
-    bool  installing;
+  const LinyapsPackageInfo *info;
+  bool installed;         /* true → show "打开", false → show "安装" */
+  float install_progress; /* 0.0 when idle, 0–1 while installing     */
+  bool installing;
 } AppEntry;
 
 typedef struct {
-    char *id;
-    char *name;
-    char *current_version;
-    char *new_version;
-    char *channel;
-    SDL_AtomicInt updating;  /* 0 = idle, 1 = updating */
-    SDL_AtomicInt progress_int;  /* 0-100, multiplied by 100 for atomic ops */
-    char *task_path;
+  char *id;
+  char *name;
+  char *current_version;
+  char *new_version;
+  char *channel;
+  SDL_AtomicInt updating;     /* 0 = idle, 1 = updating */
+  SDL_AtomicInt progress_int; /* 0-100, multiplied by 100 for atomic ops */
+  char *task_path;
 } StoreUpdateItem;
 
 /* ------------------------------------------------------------------ */
@@ -97,58 +82,58 @@ typedef struct {
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-    LinyapsContext *ctx;
+  LinyapsContext *ctx;
 
-    /* navigation */
-    NavItem     active_nav;
-    CategoryTab active_cat;
-    int         cat_scroll_x;  /* horizontal scroll offset for cat tabs */
+  /* navigation */
+  NavItem active_nav;
+  CategoryTab active_cat;
+  int cat_scroll_x; /* horizontal scroll offset for cat tabs */
 
-    /* search */
-    char search_buf[256];
-    char last_search_keyword[256];
-    bool search_focused;
-    bool is_searching;
+  /* search */
+  char search_buf[256];
+  char last_search_keyword[256];
+  bool search_focused;
+  bool is_searching;
 
-    /* package data */
-    LinyapsPackageInfo **search_results;
-    size_t               search_count;
-    long                 remote_total;    /* total count reported by API */
-    LinyapsPackageInfo **installed_list;
-    size_t               installed_count;
-    IdSet                installed_id_set; /* O(1) lookup for installed app IDs */
-    SDL_AtomicInt        loading_remote;  /* 0 = idle, 1 = loading */
-    bool                 need_refetch_on_load_complete;  /* true if window resized during load */
+  /* package data */
+  LinyapsPackageInfo **search_results;
+  size_t search_count;
+  long remote_total; /* total count reported by API */
+  LinyapsPackageInfo **installed_list;
+  size_t installed_count;
+  IdSet installed_id_set;             /* O(1) lookup for installed app IDs */
+  SDL_AtomicInt loading_remote;       /* 0 = idle, 1 = loading */
+  bool need_refetch_on_load_complete; /* true if window resized during load */
 
-    /* page size tracking for cache optimization */
-    int                  last_page_size;  /* page_size used in last request */
-    int                  last_page_data_count;  /* actual data count received for current page */
+  /* page size tracking for cache optimization */
+  int last_page_size;       /* page_size used in last request */
+  int last_page_data_count; /* actual data count received for current page */
 
-    /* updates */
-    StoreUpdateItem *update_list;
-    size_t           update_count;
-    SDL_AtomicInt    checking_updates;  /* 0 = idle, 1 = checking */
-    float            check_updates_timer;
+  /* updates */
+  StoreUpdateItem *update_list;
+  size_t update_count;
+  SDL_AtomicInt checking_updates; /* 0 = idle, 1 = checking */
+  float check_updates_timer;
 
-    /* theme */
-    bool dark_mode;
+  /* theme */
+  bool dark_mode;
 
-    /* current logical window size, refreshed before layout */
-    int window_w;
-    int window_h;
+  /* current logical window size, refreshed before layout */
+  int window_w;
+  int window_h;
 
-    /* ranking */
-    int                  ranking_tab;      /* 0 = 最新上架榜, 1 = 下载量榜 */
-    SDL_AtomicInt        loading_ranking;  /* 0 = idle, 1 = loading */
-    LinyapsPackageInfo **ranking_list;
-    size_t               ranking_count;
-    long                 ranking_total;
+  /* ranking */
+  int ranking_tab;               /* 0 = 最新上架榜, 1 = 下载量榜 */
+  SDL_AtomicInt loading_ranking; /* 0 = idle, 1 = loading */
+  LinyapsPackageInfo **ranking_list;
+  size_t ranking_count;
+  long ranking_total;
 
-    /* pagination */
-    int current_page;
+  /* pagination */
+  int current_page;
 
-    /* dirty flag driven rendering */
-    SDL_AtomicInt dirty;  /* 0 = clean, 1 = needs redraw */
+  /* dirty flag driven rendering */
+  SDL_AtomicInt dirty; /* 0 = clean, 1 = needs redraw */
 } StoreState;
 
 void store_state_init(StoreState *s, LinyapsContext *ctx);
