@@ -308,6 +308,8 @@ ctest --test-dir build
 | `docs/testing.md` | 构建命令、CLI 命令、真实环境验证 |
 | `docs/kilnui-pitfalls.md` | Clay / KilnUI 踩坑记录：floating 渲染顺序、BORDER 命令、uniform 对齐等 |
 | `docs/performance-optimizations.md` | 性能优化记录：哈希查找、事件驱动、纹理图集等 |
+| `docs/id-set-optimization.md` | 已安装应用查找优化详解：从 O(n×m) 到 O(1) 的哈希表实现 |
+| `docs/code-formatting.md` | 代码格式化规范：clang-format 配置、SDL 风格规则、格式化历史 |
 
 **AI 更新规则**：当代码中新增接口、修改架构或发现新的 D-Bus 行为时，同步更新对应的 `docs/` 文档和本文件。
 

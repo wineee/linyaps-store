@@ -22,6 +22,13 @@ This directory records the implementation research used to build the
 - [kilnui-pitfalls.md](kilnui-pitfalls.md)
   - 踩坑记录：Clay floating 渲染顺序、BORDER 命令未实现、uniform 块对齐、
     attachTo 缺失、渲染命令数量上限、Clay_String 生命周期、分页偏移等。
+- [performance-optimizations.md](performance-optimizations.md)
+  - 性能优化记录：已安装应用查找优化、鼠标移动重布局、字形纹理图集、
+    窗口大小轮询优化、字体大小缓存、字形缓存 Transfer Buffer 优化。
+- [id-set-optimization.md](id-set-optimization.md)
+  - 已安装应用查找优化详解：从 O(n×m) 到 O(1) 的哈希表实现。
+- [code-formatting.md](code-formatting.md)
+  - 代码格式化规范：clang-format 配置、SDL 风格规则、格式化历史。
 
 ## Current scope
 
